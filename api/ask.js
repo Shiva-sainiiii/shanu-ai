@@ -1,10 +1,15 @@
-export default async function handler(req, res) {
+// api/ask.js
+module.exports = async function handler(req, res) {
   try {
     const { message, mood } = req.body;
 
+    if (!message) {
+      return res.status(400).json({ error: "Message is required" });
+    }
+
     const systemPrompt = getMoodPrompt(mood);
 
-    const result = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -16,26 +21,27 @@ export default async function handler(req, res) {
           { role: "system", content: systemPrompt },
           { role: "user", content: message }
         ],
-        temperature: 1.3,
+        temperature: 1.0,
         max_tokens: 500
       })
     });
 
-    const data = await result.json();
+    const data = await response.json();
 
-    return res.status(200).json({
-      reply: data.choices[0].message.content
-    });
+    // Fallback in case response format is different
+    const reply = data.choices?.[0]?.message?.content || data.choices?.[0]?.text || "Sorry, I couldn't get a reply!";
+
+    return res.status(200).json({ reply });
 
   } catch (err) {
+    console.error("API Error:", err);
     return res.status(500).json({ error: err.message });
   }
-}
+};
 
-
-// ---------------------------------
-// Custom mood prompt function
-// ---------------------------------
+// ------------------------------
+// Custom Mood Prompt Function
+// ------------------------------
 function getMoodPrompt(mood) {
   const basePrompt = `
 You are Shanu — a friendly Hinglish AI.
