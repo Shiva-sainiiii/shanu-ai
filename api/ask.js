@@ -16,7 +16,7 @@ module.exports = async function handler(req, res) {
         "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`
       },
       body: JSON.stringify({
-        model: "meta-llama/llama-3.3-70b-instruct:free",
+        model: "moonshotai/kimi-k2",
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: message }
