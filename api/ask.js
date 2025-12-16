@@ -1,6 +1,10 @@
 // api/ask.js
-module.exports = async function handler(req, res) {
+export default async function handler(req, res) {
   try {
+    if (req.method !== "POST") {
+      return res.status(405).json({ error: "Method not allowed" });
+    }
+
     const { message, mood } = req.body;
 
     if (!message) {
@@ -9,37 +13,44 @@ module.exports = async function handler(req, res) {
 
     const systemPrompt = getMoodPrompt(mood);
 
-    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`
-      },
-      body: JSON.stringify({
-        model: "moonshotai/kimi-k2",
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: message }
-        ],
-        temperature: 1.4,
-        max_tokens: 500
-      })
-    });
+    // Gemini needs merged prompt
+    const finalPrompt = `${systemPrompt}\n\nUser: ${message}`;
+
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          contents: [
+            {
+              role: "user",
+              parts: [{ text: finalPrompt }]
+            }
+          ],
+          generationConfig: {
+            temperature: 1.2,
+            maxOutputTokens: 500
+          }
+        })
+      }
+    );
 
     const data = await response.json();
 
     const reply =
-      data?.choices?.[0]?.message?.content ||
-      data?.choices?.[0]?.text ||
-      "Sorry, I couldn't get a reply!";
+      data?.candidates?.[0]?.content?.parts?.[0]?.text ||
+      "Sorry, I couldn't generate a reply.";
 
     return res.status(200).json({ reply });
 
   } catch (err) {
-    console.error("API Error:", err);
-    return res.status(500).json({ error: err.message });
+    console.error("Gemini API Error:", err);
+    return res.status(500).json({ error: "Internal Server Error" });
   }
-};
+}
 
 // ------------------------------
 // Realistic Character Prompt
