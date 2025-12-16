@@ -1,11 +1,24 @@
 // api/ask.js
 
 export default async function handler(req, res) {
-  if (req.method !== "POST") {
-    return res.status(405).json({ error: "Method not allowed" });
+  // ------------------------------
+  // CORS (important for serverless)
+  // ------------------------------
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+
+  if (req.method === "OPTIONS") {
+    return res.status(200).end();
   }
 
-  // 🔐 Groq API key check
+  if (req.method !== "POST") {
+    return res.status(405).json({ reply: "Method not allowed" });
+  }
+
+  // ------------------------------
+  // API key check
+  // ------------------------------
   if (!process.env.GROQ_API_KEY) {
     return res.status(500).json({
       reply: "Groq API key missing on server 😬"
@@ -13,7 +26,13 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { message, mood } = req.body;
+    // ------------------------------
+    // Body parsing (serverless safe)
+    // ------------------------------
+    const body =
+      typeof req.body === "string" ? JSON.parse(req.body) : req.body;
+
+    const { message, mood } = body || {};
 
     if (!message || typeof message !== "string") {
       return res.status(400).json({
@@ -21,10 +40,14 @@ export default async function handler(req, res) {
       });
     }
 
-    // Build system prompt (mood based)
+    // ------------------------------
+    // Prompt
+    // ------------------------------
     const systemPrompt = getMoodPrompt(mood);
 
-    // 🔥 Groq Chat Completion
+    // ------------------------------
+    // Groq API call
+    // ------------------------------
     const response = await fetch(
       "https://api.groq.com/openai/v1/chat/completions",
       {
@@ -47,7 +70,6 @@ export default async function handler(req, res) {
 
     const data = await response.json();
 
-    // ❌ Groq error handling
     if (!response.ok) {
       console.error("Groq API Error:", data);
       return res.status(500).json({
@@ -55,15 +77,14 @@ export default async function handler(req, res) {
       });
     }
 
-    // ✅ Extract reply
     const reply =
       data?.choices?.[0]?.message?.content ||
       "Hmm… mujhe samajh nahi aaya 🤔";
 
     return res.status(200).json({ reply });
 
-  } catch (error) {
-    console.error("Server Error:", error);
+  } catch (err) {
+    console.error("Server Error:", err);
     return res.status(500).json({
       reply: "Server me thodi dikkat aa gayi 😬"
     });
@@ -86,7 +107,6 @@ Rules:
 `;
 
   switch (mood) {
-
     case "girlfriend":
       return basePrompt + `
 You are Pihu, a cute, caring, emotional female girlfriend.
@@ -133,4 +153,4 @@ Tone: energetic, inspiring, confidence boosting.
     default:
       return basePrompt;
   }
-  }
+      }
