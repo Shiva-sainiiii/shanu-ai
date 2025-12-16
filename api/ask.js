@@ -2,7 +2,7 @@
 
 export default async function handler(req, res) {
   // ------------------------------
-  // CORS (important for serverless)
+  // CORS
   // ------------------------------
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
@@ -19,15 +19,15 @@ export default async function handler(req, res) {
   // ------------------------------
   // API key check
   // ------------------------------
-  if (!process.env.GROQ_API_KEY) {
+  if (!process.env.OPENROUTER_API_KEY) {
     return res.status(500).json({
-      reply: "Groq API key missing on server 😬"
+      reply: "OpenRouter API key missing 😬"
     });
   }
 
   try {
     // ------------------------------
-    // Body parsing (serverless safe)
+    // Body parsing
     // ------------------------------
     const body =
       typeof req.body === "string" ? JSON.parse(req.body) : req.body;
@@ -40,24 +40,23 @@ export default async function handler(req, res) {
       });
     }
 
-    // ------------------------------
-    // Prompt
-    // ------------------------------
     const systemPrompt = getMoodPrompt(mood);
 
     // ------------------------------
-    // Groq API call
+    // OpenRouter API call
     // ------------------------------
     const response = await fetch(
-      "https://api.groq.com/openai/v1/chat/completions",
+      "https://openrouter.ai/api/v1/chat/completions",
       {
         method: "POST",
         headers: {
-          "Authorization": `Bearer ${process.env.GROQ_API_KEY}`,
-          "Content-Type": "application/json"
+          "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
+          "Content-Type": "application/json",
+          "HTTP-Referer": "https://your-site-name.com", // required
+          "X-Title": "Shanu AI Assistant" // your app name
         },
         body: JSON.stringify({
-          model: "llama-3.1-8b-instant",
+          model: "meta-llama/llama-3.1-8b-instruct:free",
           messages: [
             { role: "system", content: systemPrompt },
             { role: "user", content: message }
@@ -71,7 +70,7 @@ export default async function handler(req, res) {
     const data = await response.json();
 
     if (!response.ok) {
-      console.error("Groq API Error:", data);
+      console.error("OpenRouter API Error:", data);
       return res.status(500).json({
         reply: "AI thoda busy hai 😅 baad me try karo"
       });
@@ -153,4 +152,4 @@ Tone: energetic, inspiring, confidence boosting.
     default:
       return basePrompt;
   }
-      }
+}
