@@ -4,33 +4,58 @@
 const chatBox = document.getElementById("chat");
 const inputBox = document.getElementById("inputBox");
 const sendBtn = document.getElementById("sendBtn");
-const moodSelect = document.getElementById("moodSelect");
 const clearBtn = document.getElementById("clearBtn");
 const emptyPlaceholder = document.getElementById("emptyPlaceholder");
+
+const moodBtn = document.getElementById("moodBtn");
+const moodList = document.getElementById("moodList");
 
 // --------------------------
 // Moods list
 // --------------------------
 const MOODS = [
-  { value: "normal", label: "Normal" },
-  { value: "flirty", label: "Flirty (safe)" },
-  { value: "girlfriend", label: "Girlfriend (caring)" },
-  { value: "boyfriend", label: "Boyfriend (caring)" },
-  { value: "rude", label: "Sarcastic (polite)" },
-  { value: "baby", label: "Innocent Baby" },
-  { value: "roast", label: "Roast (safe)" },
-  { value: "coach", label: "Motivational Coach" }
+  { value: "normal", label: "😌 Normal" },
+  { value: "flirty", label: "😉 Flirty (safe)" },
+  { value: "girlfriend", label: "❤️ Girlfriend (caring)" },
+  { value: "boyfriend", label: "🛡️ Boyfriend (caring)" },
+  { value: "rude", label: "😏 Sarcastic (polite)" },
+  { value: "baby", label: "👶 Innocent Baby" },
+  { value: "roast", label: "🔥 Roast (safe)" },
+  { value: "coach", label: "💪 Motivational Coach" }
 ];
 
-// Fill dropdown
-MOODS.forEach(m => {
-  const opt = document.createElement("option");
-  opt.value = m.value;
-  opt.innerText = m.label;
-  moodSelect.appendChild(opt);
-});
-moodSelect.value = "normal";
+// --------------------------
+// Mood Dropdown Logic
+// --------------------------
+let currentMood = "normal";
 
+// fill custom dropdown
+MOODS.forEach(m => {
+  const div = document.createElement("div");
+  div.className = "mood-item";
+  div.textContent = m.label;
+
+  div.addEventListener("click", () => {
+    currentMood = m.value;
+    moodBtn.textContent = m.label;
+    moodList.style.display = "none";
+  });
+
+  moodList.appendChild(div);
+});
+
+// toggle dropdown
+moodBtn.addEventListener("click", () => {
+  moodList.style.display =
+    moodList.style.display === "block" ? "none" : "block";
+});
+
+// close dropdown on outside click
+document.addEventListener("click", (e) => {
+  if (!e.target.closest(".mood-wrap")) {
+    moodList.style.display = "none";
+  }
+});
 
 // --------------------------
 // Helper Functions
@@ -68,7 +93,6 @@ function resizeInput() {
 }
 inputBox.addEventListener("input", resizeInput);
 
-
 // --------------------------
 // Send Message
 // --------------------------
@@ -89,20 +113,17 @@ async function sendMessage() {
 
   const typing = showTyping();
 
-  const mood = moodSelect.value;
-
   try {
     const res = await fetch("/api/ask", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         message: text,
-        mood: mood
+        mood: currentMood
       })
     });
 
     const data = await res.json();
-
     typing.remove();
 
     if (data.reply) {
@@ -119,7 +140,6 @@ async function sendMessage() {
   sending = false;
   sendBtn.disabled = false;
 }
-
 
 // --------------------------
 // Events
