@@ -1,19 +1,18 @@
 // api/ask.js
-export default async function handler(req, res) {
-  try {
-    if (req.method !== "POST") {
-      return res.status(405).json({ error: "Method not allowed" });
-    }
 
+export default async function handler(req, res) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+
+  try {
     const { message, mood } = req.body;
 
-    if (!message) {
+    if (!message || typeof message !== "string") {
       return res.status(400).json({ error: "Message is required" });
     }
 
     const systemPrompt = getMoodPrompt(mood);
-
-    // Gemini needs merged prompt
     const finalPrompt = `${systemPrompt}\n\nUser: ${message}`;
 
     const response = await fetch(
@@ -40,15 +39,24 @@ export default async function handler(req, res) {
 
     const data = await response.json();
 
+    if (!response.ok) {
+      console.error("Gemini API Error:", data);
+      return res.status(500).json({
+        reply: "AI thoda busy hai 😅 baad me try karo"
+      });
+    }
+
     const reply =
-      data?.candidates?.[0]?.content?.parts?.[0]?.text ||
-      "Sorry, I couldn't generate a reply.";
+      data?.candidates?.[0]?.content?.parts?.[0]?.text ??
+      "Hmm… mujhe samajh nahi aaya 🤔";
 
     return res.status(200).json({ reply });
 
-  } catch (err) {
-    console.error("Gemini API Error:", err);
-    return res.status(500).json({ error: "Internal Server Error" });
+  } catch (error) {
+    console.error("Server Error:", error);
+    return res.status(500).json({
+      reply: "Server me thodi dikkat aa gayi 😬"
+    });
   }
 }
 
