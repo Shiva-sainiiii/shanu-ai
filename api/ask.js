@@ -70,12 +70,12 @@ export default async function handler(req, res) {
     const data = await response.json();
 
     if (!response.ok) {
-      console.error("OpenRouter API Error:", data);
-      return res.status(500).json({
-        reply: "AI thoda busy hai 😅 baad me try karo"
-      });
-    }
+  console.error("OpenRouter API Error:", data);
 
+  return res.status(500).json({
+    reply: data?.error?.message || JSON.stringify(data)
+  });
+    }
     const reply =
       data?.choices?.[0]?.message?.content ||
       "Hmm… mujhe samajh nahi aaya 🤔";
