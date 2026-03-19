@@ -167,7 +167,7 @@ export default async function handler(req, res) {
     const body =
       typeof req.body === "string" ? JSON.parse(req.body) : req.body;
 
-    const { messages, mood } = body;
+    const { message, mood } = body;
 
     if (!messages || !Array.isArray(messages)) {
       return res.status(400).json({ reply: "Invalid messages" });
