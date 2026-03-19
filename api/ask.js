@@ -1,4 +1,4 @@
-/* // api/ask.js
+ // api/ask.js
 
 export default async function handler(req, res) {
   // ------------------------------
@@ -154,7 +154,8 @@ Tone: energetic, inspiring, confidence boosting.
   }
 }
 
-*/
+
+/*
 
 export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -167,7 +168,7 @@ export default async function handler(req, res) {
     const body =
       typeof req.body === "string" ? JSON.parse(req.body) : req.body;
 
-    const { message, mood } = body;
+    const { messages, mood } = body;
 
     if (!messages || !Array.isArray(messages)) {
       return res.status(400).json({ reply: "Invalid messages" });
