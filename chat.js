@@ -354,3 +354,4 @@ clearBtn.addEventListener("click", () => {
 });
 
 inputBox.focus();
+*/
