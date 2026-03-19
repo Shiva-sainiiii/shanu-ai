@@ -1,4 +1,4 @@
-/* // --------------------------
+ // --------------------------
 // Elements
 // --------------------------
 const chatBox = document.getElementById("chat");
@@ -163,7 +163,7 @@ clearBtn.addEventListener("click", () => {
 // Focus input
 inputBox.focus();
 
-*/
+/*
 
 // --------------------------
 // Elements
