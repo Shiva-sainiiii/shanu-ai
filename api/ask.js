@@ -1,4 +1,4 @@
-// api/ask.js
+/* // api/ask.js
 
 export default async function handler(req, res) {
   // ------------------------------
@@ -152,4 +152,92 @@ Tone: energetic, inspiring, confidence boosting.
     default:
       return basePrompt;
   }
+}
+
+*/
+
+export default async function handler(req, res) {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+
+  if (req.method !== "POST") {
+    return res.status(405).json({ reply: "Method not allowed" });
+  }
+
+  try {
+    const body =
+      typeof req.body === "string" ? JSON.parse(req.body) : req.body;
+
+    const { messages, mood } = body;
+
+    if (!messages || !Array.isArray(messages)) {
+      return res.status(400).json({ reply: "Invalid messages" });
+    }
+
+    const systemPrompt = getPrompt(mood);
+
+    const response = await fetch(
+      "https://openrouter.ai/api/v1/chat/completions",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          model: "nvidia/nemotron-3-nano-30b-a3b:free",
+          messages: [
+            { role: "system", content: systemPrompt },
+            ...messages.slice(-10) // last 10 msgs only
+          ],
+          temperature: 0.8,
+          max_tokens: 200
+        })
+      }
+    );
+
+    const data = await response.json();
+
+    const reply =
+      data?.choices?.[0]?.message?.content ||
+      "Samajh nahi aaya 😅";
+
+    res.status(200).json({ reply });
+
+  } catch (err) {
+    res.status(500).json({
+      reply: "Server error 😬"
+    });
+  }
+}
+
+// --------------------------
+// SUPER PROMPT
+// --------------------------
+function getPrompt(mood) {
+  const base = `
+You are Shanu AI, created by Shiva Saini.
+
+Style:
+- Speak Hinglish (Hindi + English mix)
+- Short replies (1–3 lines)
+- Human-like, Gen-Z tone
+- Use emojis naturally
+- No robotic language
+
+Rules:
+- Never say you are AI
+- No harmful or abusive content
+- Be smart, emotional, engaging
+`;
+
+  const moods = {
+    flirty: "Playful, smooth, charming 😏",
+    girlfriend: "Caring, emotional, sweet ❤️",
+    boyfriend: "Protective, mature, calm",
+    baby: "Cute, innocent, childish 👶",
+    roast: "Funny roasting but not abusive 🔥",
+    coach: "Motivational, energetic 💪"
+  };
+
+  return base + (moods[mood] || "");
 }
