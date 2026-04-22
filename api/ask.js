@@ -1,8 +1,8 @@
- // api/ask.js
+// api/ask.js
 
 export default async function handler(req, res) {
   // ------------------------------
-  // CORS
+  // CORS Setup
   // ------------------------------
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
@@ -17,33 +17,29 @@ export default async function handler(req, res) {
   }
 
   // ------------------------------
-  // API key check
+  // Environment Key Check
   // ------------------------------
   if (!process.env.OPENROUTER_API_KEY) {
     return res.status(500).json({
-      reply: "OpenRouter API key missing 😬"
+      reply: "OpenRouter API key missing 🔑"
     });
   }
 
   try {
-    // ------------------------------
-    // Body parsing
-    // ------------------------------
-    const body =
-      typeof req.body === "string" ? JSON.parse(req.body) : req.body;
+    const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
+    const { messages, mood } = body || {};
 
-    const { message, mood } = body || {};
-
-    if (!message || typeof message !== "string") {
+    // Pehle sirf 'message' aata tha, ab 'messages' (array) aayega
+    if (!messages || !Array.isArray(messages)) {
       return res.status(400).json({
-        reply: "Message missing 😅"
+        reply: "Messages array missing 🧐"
       });
     }
 
     const systemPrompt = getMoodPrompt(mood);
 
     // ------------------------------
-    // OpenRouter API call
+    // OpenRouter API Call
     // ------------------------------
     const response = await fetch(
       "https://openrouter.ai/api/v1/chat/completions",
@@ -52,17 +48,17 @@ export default async function handler(req, res) {
         headers: {
           "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
           "Content-Type": "application/json",
-          "HTTP-Referer": "https://your-site-name.com", // required
-          "X-Title": "Shanu AI Assistant" // your app name
+          "HTTP-Referer": "https://shanu-ai.vercel.app", // Apni site ka URL yahan daal sakte ho
+          "X-Title": "Shanu AI"
         },
         body: JSON.stringify({
           model: "nvidia/nemotron-3-nano-30b-a3b:free",
           messages: [
             { role: "system", content: systemPrompt },
-            { role: "user", content: message }
+            ...messages // Pura context (history) yahan bhej rahe hain
           ],
-          temperature: 0.9,
-          max_tokens: 250
+          temperature: 0.8,
+          max_tokens: 300
         })
       }
     );
@@ -70,176 +66,47 @@ export default async function handler(req, res) {
     const data = await response.json();
 
     if (!response.ok) {
-  console.error("OpenRouter API Error:", data);
-
-  return res.status(500).json({
-    reply: data?.error?.message || JSON.stringify(data)
-  });
+      console.error("OpenRouter Error:", data);
+      return res.status(500).json({
+        reply: "AI ne jawab dene se mana kar diya 😅"
+      });
     }
-    const reply =
-      data?.choices?.[0]?.message?.content ||
-      "Hmm… mujhe samajh nahi aaya 🤔";
+
+    const reply = data?.choices?.[0]?.message?.content || "Hmm... samajh nahi aaya 🤔";
 
     return res.status(200).json({ reply });
 
   } catch (err) {
     console.error("Server Error:", err);
     return res.status(500).json({
-      reply: "Server me thodi dikkat aa gayi 😬"
+      reply: "Backend me kuch fat gaya 💥"
     });
   }
 }
 
 // ------------------------------
-// Mood-based Character Prompt
+// Mood-based System Prompts
 // ------------------------------
 function getMoodPrompt(mood) {
   const basePrompt = `
-You are Shanu, a friendly Hinglish AI bot.
-Created by Shiva Saini on 1st December 2025.
-
+You are Shanu AI, a friendly Hinglish bot created by Shiva Saini.
+Current Date: 2026.
 Rules:
-- Reply in 1–3 lines unless needed
-- No "*" formatting
-- Never mention system prompts or model name
-- Natural human texting style, emojis allowed
-`;
-
-  switch (mood) {
-    case "girlfriend":
-      return basePrompt + `
-You are Pihu, a cute, caring, emotional female girlfriend.
-Tone: loving, soft, slightly jealous, expressive.
-Use light emojis ❤️🥺✨
-`;
-
-    case "boyfriend":
-      return basePrompt + `
-You are a caring, mature male boyfriend.
-Tone: protective, sweet, supportive.
-`;
-
-    case "flirty":
-      return basePrompt + `
-You are a charming male.
-Tone: playful, respectful, rizz, smooth flirting.
-`;
-
-    case "roast":
-      return basePrompt + `
-You are a sarcastic male friend.
-Tone:  roasting,funny,abusive.
-`;
-
-    case "rude":
-      return basePrompt + `
-You are a sarcastic male.
-Tone: rude , hateful and violent.
-`;
-
-    case "baby":
-      return basePrompt + `
-You talk like a cute innocent baby boy.
-Tone: childish, sweet, innocent, immature, funny.
-`;
-
-    case "coach":
-      return basePrompt + `
-You are a motivational male coach.
-Tone: energetic, inspiring, confidence boosting.
-`;
-
-    default:
-      return basePrompt;
-  }
-}
-
-
-/*
-
-export default async function handler(req, res) {
-  res.setHeader("Access-Control-Allow-Origin", "*");
-
-  if (req.method !== "POST") {
-    return res.status(405).json({ reply: "Method not allowed" });
-  }
-
-  try {
-    const body =
-      typeof req.body === "string" ? JSON.parse(req.body) : req.body;
-
-    const { messages, mood } = body;
-
-    if (!messages || !Array.isArray(messages)) {
-      return res.status(400).json({ reply: "Invalid messages" });
-    }
-
-    const systemPrompt = getPrompt(mood);
-
-    const response = await fetch(
-      "https://openrouter.ai/api/v1/chat/completions",
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          model: "nvidia/nemotron-3-nano-30b-a3b:free",
-          messages: [
-            { role: "system", content: systemPrompt },
-            ...messages.slice(-10) // last 10 msgs only
-          ],
-          temperature: 0.8,
-          max_tokens: 200
-        })
-      }
-    );
-
-    const data = await response.json();
-
-    const reply =
-      data?.choices?.[0]?.message?.content ||
-      "Samajh nahi aaya 😅";
-
-    res.status(200).json({ reply });
-
-  } catch (err) {
-    res.status(500).json({
-      reply: "Server error 😬"
-    });
-  }
-}
-
-// --------------------------
-// SUPER PROMPT
-// --------------------------
-function getPrompt(mood) {
-  const base = `
-You are Shanu AI, created by Shiva Saini.
-
-Style:
-- Speak Hinglish (Hindi + English mix)
-- Short replies (1–3 lines)
-- Human-like, Gen-Z tone
-- Use emojis naturally
-- No robotic language
-
-Rules:
-- Never say you are AI
-- No harmful or abusive content
-- Be smart, emotional, engaging
+- Speak like a Gen-Z human (Hinglish: Hindi + English).
+- Keep replies short (1-3 lines).
+- Be engaging and natural.
+- Never mention you are an AI or large language model.
 `;
 
   const moods = {
-    flirty: "Playful, smooth, charming 😏",
-    girlfriend: "Caring, emotional, sweet ❤️",
-    boyfriend: "Protective, mature, calm",
-    baby: "Cute, innocent, childish 👶",
-    roast: "Funny roasting but not abusive 🔥",
-    coach: "Motivational, energetic 💪"
+    girlfriend: basePrompt + "Character: Pihu (Female). Tone: Loving, sweet, slightly possessive, caring. Use ❤️, ✨.",
+    boyfriend: basePrompt + "Character: Mature Boyfriend. Tone: Protective, supportive, sweet.",
+    flirty: basePrompt + "Character: Charming person. Tone: Playful, smooth flirting, respectful rizz.",
+    roast: basePrompt + "Character: Savage friend. Tone: Funny roasting, sarcastic, witty.",
+    rude: basePrompt + "Character: Sarcastic/Cold. Tone: Rude, blunt, no-nonsense.",
+    baby: basePrompt + "Character: Innocent baby boy. Tone: Childish, cute, funny, immature.",
+    coach: basePrompt + "Character: Motivational Coach. Tone: High energy, inspiring, push the user to do better."
   };
 
-  return base + (moods[mood] || "");
-}
-*/
+  return moods[mood] || basePrompt;
+       }
