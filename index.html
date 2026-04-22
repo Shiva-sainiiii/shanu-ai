@@ -3,306 +3,224 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Shanu Ai — Mood Chat</title>
+  <title>Shanu AI — Mood Chat</title>
 
+  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@300;400;600;700&display=swap" rel="stylesheet">
 
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+      font-family: "Nunito", sans-serif !important;
+    }
+    :root {
+      --bg: #0A0F19;
+      --panel: #12151c;
+      --muted: #98a1a8;
+      --cyan: #00eaff;
+      --card: #141A1E;
+      --user-text: #022;
+    }
+    html, body { height: 100%; }
+    body {
+      background: var(--bg);
+      color: #e9e9e9;
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+      min-height: 100vh;
+    }
 
+    .container {
+      width: 100%;
+      max-width: 640px;
+      background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
+      padding: 18px;
+      border-radius: 14px;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.6);
+      border: 1px solid rgba(255,255,255,0.03);
+      display: flex;
+      flex-direction: column;
+      margin-top: 20px;
+    }
 
-<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@300;400;600;700&display=swap" rel="stylesheet">
+    header {  
+      display: flex;  
+      gap: 12px;  
+      align-items: center;  
+      margin-bottom: 10px;  
+    }
 
+    .logo {
+      width: 48px;
+      height: 48px;
+      background: linear-gradient(135deg, var(--cyan), #00b3ff);
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #022;
+      font-weight: 700;
+      font-size: 18px;
+      box-shadow: 0 6px 18px rgba(0,180,255,0.06);
+    }
 
+    h1 {
+      margin-left: 5px;
+      font-size: 18px;
+      color: var(--cyan);
+      letter-spacing: 0.6px;
+    }
 
-<style>
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-  font-family: "Nunito", sans-serif !important;
-}
-:root {
-  --bg: #0A0F19;
-  --panel: #12151c;
-  --muted: #98a1a8;
-  --cyan: #00eaff;
-  --card: #141A1E;
-  --user-text: #022;
-}
-html,body { height: 100%; }
-body {
-  background: var(--bg);
-  color: #e9e9e9;
-  display: flex;
-  justify-content: center;
-  align-items: flex-start;
-  min-height: 100vh;
-}
+    .small {
+      margin-left: 5px;
+      font-size: 10px;
+      color: var(--muted);
+    }
 
-.container {
-  width: 100%;
-  max-width: 640px;
-  background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
-  padding: 18px;
-  border-radius: 14px;
-  
-  box-shadow: 0 10px 40px rgba(0,0,0,0.6);
-  border: 1px solid rgba(255,255,255,0.03);
-  display: flex;
-  flex-direction: column;
-}
+    #chat {
+      margin-top: 12px;
+      height: 60vh;
+      overflow-y: auto;
+      padding: 16px;
+      border-radius: 12px;
+      background: var(--card);
+      border: 1px solid rgba(255,255,255,0.03);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.01);
+    }
 
-header {  
+    .placeholder {
+      text-align: center;
+      color: var(--muted);
+      font-size: 13px;
+      margin-top: 40%;
+    }
 
-  display:flex;  
-  gap:12px;  
-  align-items:center;  
-  margin-bottom:10px;  
-  }
+    .msg {
+      padding: 12px 14px;
+      margin-bottom: 12px;
+      border-radius: 12px;
+      max-width: 85%;
+      width: fit-content;
+      line-height: 1.45;
+      word-break: break-word;
+      font-size: 15px;
+      animation: pop .16s ease-out;
+      box-shadow: 0 6px 20px rgba(0,0,0,0.35);
+    }
 
-.logo {
-  width:48px;
-  height:48px;
-  background: linear-gradient(135deg,var(--cyan), #00b3ff);
-  border-radius:10px;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  color: #022;
-  font-weight:700;
-  font-size:18px;
-  box-shadow: 0 6px 18px rgba(0,180,255,0.06);
-}
+    @keyframes pop {
+      from { transform: translateY(6px) scale(0.99); opacity: 0; }
+      to { transform: translateY(0) scale(1); opacity: 1; }
+    }
 
-h1 {
-margin-left:5px;
-  font-size:18px;
-  color: var(--cyan);
-  letter-spacing:0.6px;
-}
+    .user {
+      margin-left: auto;
+      background: linear-gradient(135deg, var(--cyan), #00b3ff);
+      color: var(--user-text);
+    }
 
-.small{
-margin-left:5px;
-font-size:10px;}
-.controls {
-  margin-top:8px;
-  display:flex;
-  gap:10px;
-  align-items:center;
-}
+    .bot {
+      background: #0f1418;
+      border: 1px solid rgba(255,255,255,0.03);
+      color: #e6eef6;
+    }
 
-select, .smallBtn {
-  padding:10px 10px;
-  border-radius:10px;
-  border:1px solid rgba(255,255,255,0.03);
-  background: var(--card);
-  color: #e9e9e9;
-  font-size:14px;
-  outline:none;
-}
+    .inputArea {
+      display: flex;
+      gap: 10px;
+      margin-top: 12px;
+      align-items: flex-end;
+    }
 
+    #inputBox {
+      flex: 1;
+      min-height: 44px;
+      max-height: 140px;
+      padding: 12px 14px;
+      border-radius: 12px;
+      border: none;
+      background: var(--card);
+      color: #e9e9e9;
+      outline: none;
+      font-size: 15px;
+      resize: none;
+    }
 
+    #sendBtn {
+      width: 96px;
+      padding: 12px;
+      border-radius: 12px;
+      border: none;
+      background: var(--cyan);
+      color: var(--user-text);
+      font-weight: 700;
+      cursor: pointer;
+    }
 
-.smallBtn {
-  cursor:pointer;
-}
+    .mood-wrap { position: relative; }
+    #moodBtn {
+      background: #0f1418;
+      border: 1px solid rgba(0, 234, 255, 0.3);
+      color: #e9e9e9;
+      padding: 10px 14px;
+      border-radius: 12px;
+      cursor: pointer;
+      min-width: 150px;
+      text-align: left;
+    }
 
-#chat {
+    .mood-list {
+      position: absolute;
+      top: 110%;
+      left: 0;
+      width: 100%;
+      background: #0f1418;
+      border: 1px solid rgba(255,255,255,.06);
+      border-radius: 14px;
+      display: none;
+      z-index: 10;
+    }
 
-  margin-top:12px;
-  flex:1;
-  
-  overflow-y:auto;
-  padding:16px;
-  border-radius:12px;
-  background: var(--card);
-  border:1px solid rgba(255,255,255,0.03);
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.01);
-}
+    .mood-item { padding: 12px 14px; cursor: pointer; }
+    .mood-item:hover { background: rgba(0, 234, 255, 0.15); }
+    
+    .smallBtn {
+      padding: 10px;
+      border-radius: 10px;
+      background: var(--card);
+      color: #e9e9e9;
+      border: 1px solid rgba(255,255,255,0.03);
+      cursor: pointer;
+    }
 
-.placeholder {
-  text-align:center;
-  color:var(--muted);
-  font-size:13px;
-  margin-top:40%;
-}
-
-.msg {
-  padding:12px 14px;
-  margin-bottom:12px;
-  border-radius:12px;
-  max-width:78%;
-  width:fit-content;
-  line-height:1.45;
-
-
-  word-break:break-word;
-  font-size:15px;
-  animation: pop .16s ease-out;
-  box-shadow: 0 6px 20px rgba(0,0,0,0.35);
-}
-
-@keyframes pop {
-  from { transform: translateY(6px) scale(0.99); opacity:0; }
-  to   { transform: translateY(0) scale(1); opacity:1; }
-}
-
-.user {
-  margin-left:auto;
-  background: linear-gradient(135deg, var(--cyan), #00b3ff);
-  color: var(--user-text);
-}
-
-.bot {
-  background: #0f1418;
-  border: 1px solid rgba(255,255,255,0.03);
-  color: #e6eef6;
-  max-width: 95% !important;  /* Bot bubble wider */
-  width: fit-content;
-}
-.error {
-  background: #2a0000;
-  border: 1px solid #ff3b3b;
-  color: #ffdede;
-}
-
-.inputArea {
-  display:flex;
-  gap:10px;
-  margin-top:12px;
-  align-items:flex-end;
-}
-
-#inputBox {
-  flex:1;
-  min-height:44px;
-  max-height:140px;
-  padding:12px 14px;
-  border-radius:12px;
-  border:none;
-  background: var(--card);
-  color: #e9e9e9;
-  outline:none;
-  font-size:15px;
-  resize:none;
-  overflow:auto;
-}
-
-#sendBtn {
-  width:96px;
-  padding:12px;
-  border-radius:12px;
-  border:none;
-  background: var(--cyan);
-  color: var(--user-text);
-  font-weight:700;
-  cursor:pointer;
-  transition: transform .08s ease;
-}
-#sendBtn:active { transform: translateY(1px); }
-
-@media (max-width:540px){
-  .container { padding:12px; height:100vh; border-radius:0; max-width:100%; }
-  #sendBtn { width:84px; }
-}
-
-/* Typing indicator (3 animated dots) */
-.typing-indicator {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 10px 14px;
-  background: #0f1418;
-  border-radius: 12px;
-  width: fit-content;
-  margin-bottom: 12px;
-  border: 1px solid rgba(255,255,255,0.03);
-}
-
-.typing-dot {
-  width: 8px;
-  height: 8px;
-  background: #8aa6ff;
-  border-radius: 50%;
-  animation: blink 1.4s infinite;
-  opacity: 0.6;
-}
-
-.typing-dot:nth-child(2) { animation-delay: 0.2s; }
-.typing-dot:nth-child(3) { animation-delay: 0.4s; }
-
-@keyframes blink {
-  0% { opacity: 0.2; transform: translateY(0); }
-  50% { opacity: 1;   transform: translateY(-4px); }
-  100% { opacity: 0.2; transform: translateY(0); }
-}
-
-.mood-wrap{
-  position:relative;
-}
-
-#moodBtn{
-  background: linear-gradient(135deg,#0f1418,#141a1e);
-  border:1px solid rgba(0,234,255,.3);
-  color:#e9e9e9;
-  padding:10px 14px;
-  border-radius:12px;
-  cursor:pointer;
-  font-weight:600;
-  min-width:170px;
-  text-align:left;
-}
-
-
-.mood-list{
-  position:absolute;
-  top:110%;
-  left:0;
-  width:100%;
-  background:#0f1418;
-  border:1px solid rgba(255,255,255,.06);
-  border-radius:14px;
-  overflow:hidden;
-  display:none;
-  z-index:10;
-  box-shadow:0 20px 40px rgba(0,0,0,.6);
-}
-button, .smallBtn, .mood-item{
-  -webkit-tap-highlight-color: transparent;
-  tap-highlight-color: transparent;
-  outline: none;
-}
-.mood-item{
-  padding:12px 14px;
-  cursor:pointer;
-  transition:.15s;
-}
-
-.mood-item:hover{
-  background:rgba(0,234,255,.15);
-}
-</style>
+    @media (max-width: 540px) {
+      .container { padding: 12px; height: 100vh; border-radius: 0; margin-top: 0; }
+    }
+  </style>
 </head>
 
 <body>
   <div class="container">
     <header>
-
+      <div class="logo">S</div>
       <div>
-        <h1>Shanu Ai</h1>
-        <div class="small">By Harsh Rohilla </div>
-      </div>
+        <h1>Shanu AI</h1>
+        <div class="small">By Shiva Saini</div> </div>
 
-      <div style="margin-left:auto; display:flex; gap:8px;">
-<div class="mood-wrap">
-  <button id="moodBtn">😌 Normal</button>
-  <div class="mood-list" id="moodList"></div>
-</div>
+      <div style="margin-left: auto; display: flex; gap: 8px;">
+        <div class="mood-wrap">
+          <button id="moodBtn">😌 Normal</button>
+          <div class="mood-list" id="moodList"></div>
+        </div>
         <button class="smallBtn" id="clearBtn">Clear</button>
       </div>
     </header>
 
     <div id="chat">
       <div class="placeholder" id="emptyPlaceholder">
-        Say hi to Shanu 👋 — choose a mood and start chatting.
+        Say hi to Shanu 👋 — messages will be saved to your session.
       </div>
     </div>
 
@@ -311,6 +229,31 @@ button, .smallBtn, .mood-item{
       <button id="sendBtn">Send</button>
     </div>
   </div>
-<script src="chat.js"></script>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/12.12.1/firebase-app.js";
+    import { getFirestore, collection, addDoc, query, where, orderBy, limit, getDocs } from "https://www.gstatic.com/firebasejs/12.12.1/firebase-firestore.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyCBAQgLhVaNcH1YS_qldqKTJ9Kg-JO9A74",
+      authDomain: "shanu-ai.firebaseapp.com",
+      projectId: "shanu-ai",
+      storageBucket: "shanu-ai.firebasestorage.app",
+      messagingSenderId: "225114447873",
+      appId: "1:225114447873:web:408763c5b259506506a000",
+      measurementId: "G-YLWQX2C85W"
+    };
+
+    // Initialize Firebase
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+
+    // Export variables to window for chat.js
+    window.db = db;
+    window.fsHelpers = { collection, addDoc, query, where, orderBy, limit, getDocs };
+  </script>
+
+  <script src="chat.js"></script>
 </body>
-</html>
+                      </html>
+                      
