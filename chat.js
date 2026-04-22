@@ -1,11 +1,18 @@
 // ==========================================
-// Shanu AI — Chat Logic v2
+// Shanu AI — Chat Logic v3
 // Developer: Shiva Saini
-// Upgrades: File Upload (OCR / PDF / TXT), Mic (Web Speech API),
-//           Enhanced UI, Toast Notifications, Mobile Sidebar
+// Upgrades: Google Auth, Global Tesseract Worker, Smart 3-Path File Handler,
+//           Image Pre-processing (Grayscale + Contrast), Chat Privacy
 // ==========================================
 
-import { saveMessageToDB, loadHistoryFromDB, clearSessionDB } from './firebase.js';
+import {
+    saveMessageToDB,
+    loadHistoryFromDB,
+    clearSessionDB,
+    signInWithGoogle,
+    signOutUser,
+    onAuthStateChange
+} from './firebase.js';
 
 // ------------------------------------------
 // 1. DOM Elements
@@ -28,10 +35,9 @@ const recentMoods      = document.getElementById("recentMoods");
 const attachBtn        = document.getElementById("attachBtn");
 const fileInput        = document.getElementById("fileInput");
 const filePreviewBar   = document.getElementById("filePreviewBar");
-const fileChip         = document.getElementById("fileChip");
+const fileChipIcon     = document.getElementById("fileChipIcon");
 const fileChipName     = document.getElementById("fileChipName");
 const fileChipStatus   = document.getElementById("fileChipStatus");
-const fileChipIcon     = document.getElementById("fileChipIcon");
 const removeFileBtn    = document.getElementById("removeFileBtn");
 const ocrProgressBar   = document.getElementById("ocrProgressBar");
 const ocrProgressFill  = document.getElementById("ocrProgressFill");
@@ -49,16 +55,28 @@ const menuBtn          = document.getElementById("menuBtn");
 const sidebar          = document.getElementById("sidebar");
 const sidebarOverlay   = document.getElementById("sidebarOverlay");
 
+// Auth elements
+const loginBtn             = document.getElementById("loginBtn");
+const logoutBtn            = document.getElementById("logoutBtn");
+const userProfileBadge     = document.getElementById("userProfileBadge");
+const userAvatarHeader     = document.getElementById("userAvatarHeader");
+const userFirstName        = document.getElementById("userFirstName");
+const sidebarUserPanel     = document.getElementById("sidebarUserPanel");
+const sidebarUserAvatar    = document.getElementById("sidebarUserAvatar");
+const sidebarUserName      = document.getElementById("sidebarUserName");
+const sidebarUserEmail     = document.getElementById("sidebarUserEmail");
+
 // ------------------------------------------
 // 2. State
 // ------------------------------------------
-let currentMood   = "normal";
-let sending       = false;
-let chatContext   = [];
-let selectedFile  = null;   // Currently attached file object
-let isRecording   = false;
-let recognition   = null;   // SpeechRecognition instance
-let toastTimer    = null;
+let currentMood  = "normal";
+let sending      = false;
+let chatContext  = [];
+let selectedFile = null;
+let isRecording  = false;
+let recognition  = null;
+let toastTimer   = null;
+let chatInitDone = false;   // Prevents double-init on rapid auth state fires
 
 const MOODS = [
     { value: "normal",     label: "😌 Normal"     },
@@ -71,8 +89,40 @@ const MOODS = [
     { value: "coach",      label: "💪 Coach"       },
 ];
 
+// ==========================================
+// 3. GLOBAL TESSERACT WORKER
+// Pre-warmed on page load — eliminates first-use lag.
+// Single worker reused for all OCR operations.
+// ==========================================
+let _workerPromise = null;
+
+function getTesseractWorker() {
+    if (!_workerPromise) {
+        _workerPromise = Tesseract.createWorker('eng+hin', 1, {
+            logger: (m) => {
+                // Stream progress into the UI as recognition runs
+                if (m.status === 'recognizing text') {
+                    const pct = 20 + Math.round(m.progress * 70);
+                    updateOcrProgress(pct);
+                    fileChipStatus.textContent = `Scanning... ${Math.round(m.progress * 100)}%`;
+                }
+            }
+        }).catch(err => {
+            // Reset so next call retries
+            _workerPromise = null;
+            console.error("Tesseract worker init failed:", err);
+            throw err;
+        });
+    }
+    return _workerPromise;
+}
+
+// Pre-warm the worker as soon as the script loads
+// (runs in background — non-blocking)
+getTesseractWorker().catch(() => {});
+
 // ------------------------------------------
-// 3. Toast Notification
+// 4. Toast Notification
 // ------------------------------------------
 function showToast(msg, duration = 3000) {
     toastMsg.textContent = msg;
@@ -82,7 +132,7 @@ function showToast(msg, duration = 3000) {
 }
 
 // ------------------------------------------
-// 4. Mood Dropdown
+// 5. Mood Dropdown
 // ------------------------------------------
 MOODS.forEach(m => {
     const div = document.createElement("div");
@@ -128,7 +178,7 @@ function addToRecentMoods(moodObj) {
 }
 
 // ------------------------------------------
-// 5. Mobile Sidebar
+// 6. Mobile Sidebar
 // ------------------------------------------
 menuBtn?.addEventListener("click", () => {
     sidebar.classList.toggle("open");
@@ -141,7 +191,7 @@ sidebarOverlay?.addEventListener("click", () => {
 });
 
 // ------------------------------------------
-// 6. Input Resize & Keyboard
+// 7. Input Resize & Keyboard
 // ------------------------------------------
 function resizeInput() {
     inputBox.style.height = "auto";
@@ -158,7 +208,7 @@ inputBox.addEventListener("keydown", (e) => {
 });
 
 // ------------------------------------------
-// 7. Chat UI Helpers
+// 8. Chat UI Helpers
 // ------------------------------------------
 function scrollToBottom() {
     chatBox.scrollTo({ top: chatBox.scrollHeight, behavior: "smooth" });
@@ -166,6 +216,26 @@ function scrollToBottom() {
 
 function hidePlaceholder() {
     if (emptyPlaceholder) emptyPlaceholder.style.display = "none";
+}
+
+function showPlaceholder() {
+    if (emptyPlaceholder) {
+        // Re-attach if it was removed from DOM
+        if (!chatBox.contains(emptyPlaceholder)) {
+            chatBox.appendChild(emptyPlaceholder);
+        }
+        emptyPlaceholder.style.display = "";
+    }
+}
+
+function clearChatDisplay() {
+    // Remove all message nodes but preserve the emptyPlaceholder reference
+    const nodes = Array.from(chatBox.childNodes);
+    nodes.forEach(node => {
+        if (node !== emptyPlaceholder) chatBox.removeChild(node);
+    });
+    showPlaceholder();
+    chatContext = [];
 }
 
 function addMessage(text, type = "bot") {
@@ -181,7 +251,7 @@ function addMessage(text, type = "bot") {
 function addFileMessageBubble(file) {
     hidePlaceholder();
     const type = getFileCategory(file.type);
-    const iconMap = { image: "fa-image", pdf: "fa-file-pdf", text: "fa-file-lines" };
+    const iconMap  = { image: "fa-image", pdf: "fa-file-pdf", text: "fa-file-lines" };
     const labelMap = { image: "Image scanned via OCR", pdf: "PDF text extracted", text: "Text file read" };
 
     const wrap = document.createElement("div");
@@ -229,18 +299,14 @@ function unlockUI() {
 }
 
 // ------------------------------------------
-// 8. Core Send Logic
+// 9. Core Send Logic
 // ------------------------------------------
 async function handleSendAction() {
     if (sending) return;
-
-    // If a file is attached, process it first
     if (selectedFile) {
-        await procesAndSendFile(selectedFile);
+        await processAndSendFile(selectedFile);
         return;
     }
-
-    // Plain text send
     const text = inputBox.value.trim();
     if (!text) return;
     await sendTextMessage(text);
@@ -252,10 +318,10 @@ async function sendTextMessage(text) {
     resizeInput();
     chatContext.push({ role: "user", content: text });
     await saveMessageToDB("user", text);
-    await callAPI(text);
+    await callAPI();
 }
 
-async function callAPI(userMsgForContext) {
+async function callAPI() {
     lockUI();
     const typingEl = showTyping();
 
@@ -264,8 +330,8 @@ async function callAPI(userMsgForContext) {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-                messages: chatContext.slice(-10),
-                mood: currentMood
+                messages: chatContext.slice(-12),  // Last 12 turns for context
+                mood:     currentMood
             })
         });
 
@@ -287,26 +353,38 @@ async function callAPI(userMsgForContext) {
 }
 
 // ------------------------------------------
-// 9. File Upload & OCR System
+// 10. SMART FILE HANDLER — 3 Distinct Paths
 // ------------------------------------------
+
+// Utility: categorize file type
 function getFileCategory(mimeType) {
     if (mimeType.startsWith("image/")) return "image";
     if (mimeType === "application/pdf") return "pdf";
     return "text";
 }
 
+// Utility: icon class for file type
 function getFileIcon(mimeType) {
-    const cat = getFileCategory(mimeType);
-    return { image: "fa-file-image", pdf: "fa-file-pdf", text: "fa-file-lines" }[cat];
+    return {
+        image: "fa-file-image",
+        pdf:   "fa-file-pdf",
+        text:  "fa-file-lines"
+    }[getFileCategory(mimeType)] || "fa-file";
 }
 
+// OCR progress helper
+function updateOcrProgress(percent) {
+    ocrProgressBar.classList.add("show");
+    ocrProgressFill.style.width = `${Math.min(percent, 100)}%`;
+}
+
+// Attach button
 attachBtn.addEventListener("click", () => fileInput.click());
 
 fileInput.addEventListener("change", (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // Size check — 10 MB max
     if (file.size > 10 * 1024 * 1024) {
         showToast("⚠️ File too large. Max 10 MB.");
         fileInput.value = "";
@@ -316,7 +394,6 @@ fileInput.addEventListener("change", (e) => {
     selectedFile = file;
     const cat = getFileCategory(file.type);
 
-    // Update chip
     fileChipName.textContent = file.name;
     fileChipStatus.textContent = "Ready — click Send to process";
     fileChipIcon.className = `file-chip-icon ${cat}`;
@@ -341,33 +418,28 @@ function clearFileAttachment() {
     inputBox.placeholder = "Message Shanu AI...";
 }
 
-function updateOcrProgress(percent) {
-    ocrProgressBar.classList.add("show");
-    ocrProgressFill.style.width = `${Math.min(percent, 100)}%`;
-}
-
-async function procesAndSendFile(file) {
-    const cat = getFileCategory(file.type);
+// ---- Main file dispatch ----
+async function processAndSendFile(file) {
+    const cat          = getFileCategory(file.type);
     const userTypedText = inputBox.value.trim();
 
-    // Show file bubble in chat
     addFileMessageBubble(file);
-
     inputBox.value = "";
     resizeInput();
-
-    // Update chip status
     fileChipStatus.textContent = "Processing...";
-    updateOcrProgress(10);
+    updateOcrProgress(5);
 
     let extractedText = "";
 
     try {
         if (cat === "image") {
+            // PATH C — Image upload with preprocessing
             extractedText = await extractTextFromImage(file);
         } else if (cat === "pdf") {
+            // PATH A first (fast), falls back to PATH B (OCR) if needed
             extractedText = await extractTextFromPDF(file);
         } else {
+            // Plain text / CSV
             extractedText = await readTextFile(file);
         }
     } catch (err) {
@@ -379,107 +451,196 @@ async function procesAndSendFile(file) {
 
     updateOcrProgress(100);
 
-    // Build context message
+    // Build context message sent to AI
     let contextMsg = `[📎 File: ${file.name}]\n`;
-
     if (extractedText.trim().length > 0) {
-        // Limit to 3000 chars to avoid token overflow
         const trimmed = extractedText.trim().slice(0, 3000);
         contextMsg += `\nExtracted Content:\n"""\n${trimmed}\n"""`;
     } else {
         contextMsg += "\n[No readable text found in this file]";
         showToast("⚠️ No text could be extracted from this file.");
     }
-
     if (userTypedText) {
         contextMsg += `\n\nUser says: ${userTypedText}`;
     }
 
-    // Save & send
     chatContext.push({ role: "user", content: contextMsg });
     await saveMessageToDB("user", contextMsg);
-
     clearFileAttachment();
-    await callAPI(contextMsg);
+    await callAPI();
 }
 
-// ---- Image OCR using Tesseract.js ----
-async function extractTextFromImage(file) {
-    fileChipStatus.textContent = "Running OCR scan...";
-
-    return new Promise((resolve, reject) => {
-        Tesseract.recognize(file, "eng+hin", {
-            logger: (m) => {
-                if (m.status === "recognizing text") {
-                    const progress = 15 + Math.round(m.progress * 75);
-                    updateOcrProgress(progress);
-                    fileChipStatus.textContent = `Scanning... ${Math.round(m.progress * 100)}%`;
-                }
-            }
-        }).then(({ data: { text } }) => {
-            resolve(text);
-        }).catch(reject);
-    });
-}
-
-// ---- PDF Text Extraction using PDF.js ----
+// ==========================================
+// PATH A — Searchable PDF (fastest)
+// Uses pdf.js to extract embedded text directly.
+// If extracted text is < 60 chars, it's likely a scanned
+// PDF with no real text, so we fall through to PATH B.
+// ==========================================
 async function extractTextFromPDF(file) {
-    fileChipStatus.textContent = "Reading PDF...";
-    updateOcrProgress(20);
+    fileChipStatus.textContent = "Reading PDF text...";
+    updateOcrProgress(10);
 
-    const arrayBuffer = await file.arrayBuffer();
-    const typedArray = new Uint8Array(arrayBuffer);
-
-    // Set PDF.js worker
     const pdfjsLib = window["pdfjs-dist/build/pdf"];
     if (!pdfjsLib) throw new Error("PDF.js not loaded");
     pdfjsLib.GlobalWorkerOptions.workerSrc =
         "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 
-    const pdf = await pdfjsLib.getDocument({ data: typedArray }).promise;
+    const arrayBuffer = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) }).promise;
     let fullText = "";
-    const totalPages = pdf.numPages;
 
-    for (let i = 1; i <= totalPages; i++) {
-        const page = await pdf.getPage(i);
+    for (let i = 1; i <= pdf.numPages; i++) {
+        const page        = await pdf.getPage(i);
         const textContent = await page.getTextContent();
-        const pageText = textContent.items.map(item => item.str).join(" ");
+        const pageText    = textContent.items.map(item => item.str).join(" ");
         fullText += `\n--- Page ${i} ---\n${pageText}`;
+        updateOcrProgress(10 + Math.round((i / pdf.numPages) * 40));
+    }
 
-        const progress = 20 + Math.round((i / totalPages) * 75);
-        updateOcrProgress(progress);
-        fileChipStatus.textContent = `Reading page ${i} of ${totalPages}...`;
+    // PATH B fallback — scanned/image-based PDF
+    if (fullText.trim().length < 60) {
+        showToast("📄 Scanned PDF detected — switching to OCR...");
+        return extractTextFromScannedPDF(pdf);
     }
 
     return fullText;
 }
 
-// ---- Plain Text File ----
+// ==========================================
+// PATH B — Scanned / Image PDF via OCR
+// Renders each page onto a hidden canvas at 2× scale,
+// then passes the canvas to the global Tesseract worker.
+// ==========================================
+async function extractTextFromScannedPDF(pdf) {
+    fileChipStatus.textContent = "Scanned PDF — Running page OCR...";
+    updateOcrProgress(50);
+
+    const worker = await getTesseractWorker();
+    const canvas  = document.createElement("canvas");
+    const ctx     = canvas.getContext("2d");
+    let   fullText = "";
+
+    for (let i = 1; i <= pdf.numPages; i++) {
+        const page     = await pdf.getPage(i);
+        // Render at 2× scale — significantly improves OCR accuracy
+        const viewport = page.getViewport({ scale: 2.0 });
+        canvas.width   = viewport.width;
+        canvas.height  = viewport.height;
+
+        await page.render({ canvasContext: ctx, viewport }).promise;
+
+        fileChipStatus.textContent = `OCR: Page ${i} of ${pdf.numPages}...`;
+        const { data: { text } } = await worker.recognize(canvas);
+        fullText += `\n--- Page ${i} ---\n${text}`;
+
+        updateOcrProgress(50 + Math.round((i / pdf.numPages) * 45));
+    }
+
+    return fullText;
+}
+
+// ==========================================
+// PATH C — Direct Image Upload with Pre-processing
+// Applies grayscale + contrast enhancement on a canvas
+// before passing to Tesseract, which materially improves
+// accuracy on low-contrast, color, or noisy images.
+// ==========================================
+async function extractTextFromImage(file) {
+    fileChipStatus.textContent = "Preprocessing image...";
+    updateOcrProgress(10);
+
+    const processedCanvas = await preprocessImageForOCR(file);
+    updateOcrProgress(20);
+
+    fileChipStatus.textContent = "Running OCR...";
+    const worker = await getTesseractWorker();
+    const { data: { text } } = await worker.recognize(processedCanvas);
+
+    return text;
+}
+
+/**
+ * Preprocess an image for better OCR accuracy:
+ * 1. Scale up if small (max 1600px on longest side)
+ * 2. Convert to grayscale (removes color noise)
+ * 3. Boost contrast (makes text edges sharper)
+ *
+ * @param {File} file - The image file
+ * @returns {Promise<HTMLCanvasElement>} Processed canvas ready for Tesseract
+ */
+async function preprocessImageForOCR(file) {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        const url = URL.createObjectURL(file);
+
+        img.onload = () => {
+            // Scale up small images for better OCR, cap at 1600px
+            const maxDim = 1600;
+            const scale  = Math.min(2.0, maxDim / Math.max(img.width, img.height, 1));
+
+            const canvas = document.createElement("canvas");
+            canvas.width  = Math.round(img.width  * scale);
+            canvas.height = Math.round(img.height * scale);
+
+            const ctx = canvas.getContext("2d");
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+            // Apply grayscale + contrast filter pixel-by-pixel
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const data      = imageData.data;
+            const CONTRAST  = 1.6; // 1.0 = no change, >1 = more contrast
+
+            for (let i = 0; i < data.length; i += 4) {
+                // Luminance-weighted grayscale (ITU-R BT.601)
+                const gray = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+                // Contrast: expand distance from midpoint (128)
+                const c    = Math.max(0, Math.min(255, (gray - 128) * CONTRAST + 128));
+                data[i] = data[i + 1] = data[i + 2] = c; // R = G = B (grayscale)
+                // data[i + 3] stays the same (alpha unchanged)
+            }
+
+            ctx.putImageData(imageData, 0, 0);
+            URL.revokeObjectURL(url);
+            resolve(canvas);
+        };
+
+        img.onerror = () => {
+            URL.revokeObjectURL(url);
+            reject(new Error("Image load failed"));
+        };
+
+        img.src = url;
+    });
+}
+
+// ==========================================
+// Plain text / CSV reader
+// ==========================================
 async function readTextFile(file) {
     fileChipStatus.textContent = "Reading file...";
     updateOcrProgress(60);
     return new Promise((resolve, reject) => {
         const reader = new FileReader();
-        reader.onload = (e) => resolve(e.target.result || "");
+        reader.onload  = (e) => resolve(e.target.result || "");
         reader.onerror = reject;
         reader.readAsText(file, "UTF-8");
     });
 }
 
 // ------------------------------------------
-// 10. Microphone — Web Speech API
+// 11. Microphone — Web Speech API
 // ------------------------------------------
 function initSpeechRecognition() {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) {
-        showToast("⚠️ Voice input not supported in this browser. Use Chrome.");
+        showToast("⚠️ Voice input not supported. Use Chrome.");
         return false;
     }
 
-    recognition = new SR();
-    recognition.lang = "hi-IN"; // Hinglish — Hindi + English fallback
+    recognition               = new SR();
+    recognition.lang          = "hi-IN";   // Hinglish: Hindi + English
     recognition.interimResults = true;
-    recognition.continuous = false;
+    recognition.continuous    = false;
     recognition.maxAlternatives = 1;
 
     recognition.onstart = () => {
@@ -503,12 +664,8 @@ function initSpeechRecognition() {
         micBtn.classList.remove("recording");
         micIcon.className = "fa-solid fa-microphone";
         inputBox.placeholder = selectedFile ? "Add a message (optional)..." : "Message Shanu AI...";
-
-        // Auto-send if text was captured
         const t = inputBox.value.trim();
-        if (t) {
-            setTimeout(() => handleSendAction(), 300);
-        }
+        if (t) setTimeout(() => handleSendAction(), 300);
     };
 
     recognition.onerror = (e) => {
@@ -517,9 +674,9 @@ function initSpeechRecognition() {
         micBtn.classList.remove("recording");
         micIcon.className = "fa-solid fa-microphone";
         const msgs = {
-            "no-speech": "No speech detected. Try again.",
+            "no-speech":   "No speech detected. Try again.",
             "not-allowed": "Microphone permission denied.",
-            "network": "Network error during voice input."
+            "network":     "Network error during voice input."
         };
         showToast(`⚠️ ${msgs[e.error] || "Voice input error."}`);
     };
@@ -532,57 +689,123 @@ micBtn.addEventListener("click", () => {
         recognition?.stop();
         return;
     }
-
     if (!recognition) {
         const ok = initSpeechRecognition();
         if (!ok) return;
     }
-
     try {
         recognition.start();
     } catch (e) {
-        // Already started — stop and restart
         recognition.stop();
         setTimeout(() => recognition.start(), 300);
     }
 });
 
 // ------------------------------------------
-// 11. Send Button
+// 12. Send Button
 // ------------------------------------------
 sendBtn.addEventListener("click", handleSendAction);
 
 // ------------------------------------------
-// 12. Clear & New Chat
+// 13. Clear & New Chat
 // ------------------------------------------
 clearBtn.addEventListener("click", async () => {
     if (!confirm("Bhai, saari chat delete kar doon? 🗑️")) return;
     await clearSessionDB();
-    chatBox.innerHTML = "";
-    if (emptyPlaceholder) {
-        chatBox.appendChild(emptyPlaceholder);
-        emptyPlaceholder.style.display = "flex";
-    }
-    chatContext = [];
-    clearFileAttachment();
+    // clearSessionDB reloads the page — code below is a safety net
+    clearChatDisplay();
     showToast("Chat cleared ✓");
 });
 
 newChatBtn.addEventListener("click", () => {
     inputBox.focus();
-    // Close mobile sidebar
     sidebar.classList.remove("open");
     sidebarOverlay.classList.remove("show");
 });
 
 // ------------------------------------------
-// 13. Init — Load history from Firebase
+// 14. Google Auth — Login / Logout
+// ------------------------------------------
+loginBtn?.addEventListener("click", async () => {
+    try {
+        await signInWithGoogle();
+        // onAuthStateChange callback below fires automatically after this
+    } catch (e) {
+        console.error("Sign-in error:", e);
+        if (e.code !== "auth/popup-closed-by-user") {
+            showToast("⚠️ Sign in failed. Please try again.");
+        }
+    }
+});
+
+logoutBtn?.addEventListener("click", async () => {
+    if (!confirm("Sign out karna chahte ho?")) return;
+    try {
+        await signOutUser();
+        showToast("Signed out ✓");
+        // onAuthStateChange fires automatically — UI and chat will reset
+    } catch (e) {
+        showToast("⚠️ Sign out failed.");
+    }
+});
+
+// ------------------------------------------
+// 15. Auth State — Drives ALL UI + Chat Init
+// onAuthStateChanged fires:
+//   (a) immediately on page load with current state
+//   (b) whenever auth state changes (login/logout)
+// We use this as the SINGLE trigger for loading chats.
+// ------------------------------------------
+onAuthStateChange(async (user) => {
+    if (user) {
+        // ---- Logged-in state ----
+        const firstName = user.displayName?.split(" ")[0] || "User";
+
+        // Header badge
+        loginBtn.style.display            = "none";
+        userProfileBadge.style.display    = "flex";
+        userAvatarHeader.src              = user.photoURL  || "";
+        userAvatarHeader.title            = user.displayName || user.email;
+        userFirstName.textContent         = firstName;
+
+        // Sidebar panel
+        sidebarUserPanel.style.display    = "flex";
+        sidebarUserAvatar.src             = user.photoURL  || "";
+        sidebarUserName.textContent       = user.displayName || "User";
+        sidebarUserEmail.textContent      = user.email || "";
+
+        // Logout btn in sidebar footer
+        logoutBtn.style.display           = "inline-flex";
+
+        showToast(`Welcome back, ${firstName}! ✨`);
+
+    } else {
+        // ---- Guest / logged-out state ----
+        loginBtn.style.display            = "flex";
+        userProfileBadge.style.display    = "none";
+        sidebarUserPanel.style.display    = "none";
+        logoutBtn.style.display           = "none";
+    }
+
+    // Reload chats for the current user (uid or guestId)
+    // Guard prevents double-load on rapid auth state changes
+    clearChatDisplay();
+    chatInitDone = false;
+    await initChat();
+});
+
+// ------------------------------------------
+// 16. Init — Load history from Firestore
+// Only loads messages belonging to the current user.
 // ------------------------------------------
 async function initChat() {
+    if (chatInitDone) return;
+    chatInitDone = true;
+
     try {
         const history = await loadHistoryFromDB(20);
         if (history.length > 0) {
-            if (emptyPlaceholder) emptyPlaceholder.style.display = "none";
+            hidePlaceholder();
             history.forEach(m => {
                 const role = m.role === "user" ? "user" : "bot";
                 addMessage(m.content, role);
@@ -590,8 +813,6 @@ async function initChat() {
             });
         }
     } catch (err) {
-        console.error("Init error:", err);
+        console.error("Chat init error:", err);
     }
 }
-
-document.addEventListener("DOMContentLoaded", initChat);

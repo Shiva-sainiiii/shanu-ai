@@ -1,7 +1,7 @@
 /* =========================================
-   Shanu AI — Premium Glassmorphism UI v2
+   Shanu AI — Premium Glassmorphism UI v3
    Developer: Shiva Saini
-   Upgrades: OCR Upload, Mic, Enhanced Animations
+   Upgrades: Z-Index Fix, Auth UI, OCR Upload, Mic, Enhanced Animations
 ========================================= */
 
 /* ---- Variables & Reset ---- */
@@ -187,6 +187,48 @@ body {
     margin-top: 1px;
 }
 
+/* ---- Sidebar User Panel ---- */
+.sidebar-user-panel {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--glass-border);
+    background: var(--primary-dim);
+    animation: fadeSlideUp 0.4s ease both;
+}
+
+.sidebar-user-avatar {
+    width: 34px; height: 34px;
+    border-radius: 50%;
+    border: 2px solid rgba(0, 229, 255, 0.4);
+    object-fit: cover;
+    flex-shrink: 0;
+}
+
+.sidebar-user-info {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.sidebar-user-name {
+    font-size: 12.5px;
+    font-weight: 700;
+    color: var(--text-main);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.sidebar-user-email {
+    font-size: 10.5px;
+    color: var(--text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
 .sidebar-nav {
     flex: 1;
     padding: 20px 16px;
@@ -269,6 +311,7 @@ body {
 }
 
 /* ---- Header ---- */
+/* FIX: position + z-index ensure mood dropdown always renders above chat bubbles */
 .chat-header {
     height: 68px;
     padding: 0 28px;
@@ -279,6 +322,8 @@ body {
     background: rgba(0, 0, 0, 0.15);
     backdrop-filter: blur(8px);
     flex-shrink: 0;
+    position: relative;    /* ← FIX: creates stacking context */
+    z-index: 100;          /* ← FIX: sits above chat messages & their animations */
 }
 
 .header-left {
@@ -290,12 +335,14 @@ body {
 .header-right {
     display: flex;
     align-items: center;
-    gap: 16px;
+    gap: 12px;
 }
 
 .mobile-menu-btn { display: none; }
 
-.mood-selector-wrapper { position: relative; }
+.mood-selector-wrapper {
+    position: relative;
+}
 
 .glass-btn {
     background: rgba(255, 255, 255, 0.04);
@@ -327,20 +374,21 @@ body {
 
 .glass-btn.open .chev-icon { transform: rotate(180deg); }
 
-/* Mood Dropdown */
+/* Mood Dropdown — FIX: z-index 9999 guarantees it's always on top */
 .mood-dropdown {
     position: absolute;
     top: calc(100% + 10px);
     left: 0;
     width: 190px;
-    background: rgba(10, 14, 26, 0.92);
+    background: rgba(10, 14, 26, 0.96);
     border: 1px solid var(--glass-border-h);
     border-radius: var(--radius-md);
     padding: 6px;
     display: none;
-    z-index: 300;
+    z-index: 9999;         /* ← FIX: was 300, now guaranteed on top */
     box-shadow: var(--shadow-lg);
     backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
     animation: dropIn 0.2s ease forwards;
 }
 
@@ -396,6 +444,55 @@ body {
     100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
 }
 
+/* ========== AUTH SECTION ========== */
+.auth-section {
+    display: flex;
+    align-items: center;
+}
+
+/* Google Sign-In button */
+.auth-login-btn {
+    padding: 7px 13px;
+    font-size: 12.5px;
+    gap: 7px;
+    border-color: rgba(255, 255, 255, 0.1);
+}
+
+.auth-login-btn:hover {
+    border-color: rgba(234, 67, 53, 0.35);
+    background: rgba(234, 67, 53, 0.06);
+}
+
+/* User profile badge (shown when logged in) */
+.user-profile-badge {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 10px 4px 4px;
+    background: var(--primary-dim);
+    border: 1px solid rgba(0, 229, 255, 0.2);
+    border-radius: var(--radius-xl);
+    animation: fadeSlideUp 0.4s ease both;
+}
+
+.user-avatar-header {
+    width: 28px; height: 28px;
+    border-radius: 50%;
+    border: 1.5px solid rgba(0, 229, 255, 0.5);
+    object-fit: cover;
+    flex-shrink: 0;
+}
+
+.user-first-name {
+    font-size: 12.5px;
+    font-weight: 700;
+    color: var(--primary);
+    max-width: 80px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
 /* ========== CHAT DISPLAY ========== */
 .chat-display {
     flex: 1;
@@ -405,13 +502,16 @@ body {
     flex-direction: column;
     scroll-behavior: smooth;
     overscroll-behavior: contain;
+    /* FIX: explicit z-index ensures messages don't leak above the header */
+    position: relative;
+    z-index: 1;
 }
 
 /* Welcome Screen */
 .welcome-screen {
     margin: auto;
     text-align: center;
-    max-width: 420px;
+    max-width: 440px;
     animation: fadeSlideUp 0.8s ease both;
 }
 
@@ -501,6 +601,7 @@ body {
 .pill i { font-size: 10px; }
 
 /* ---- Message Bubbles ---- */
+/* FIX: z-index: 1 contains each msg stacking context so they never escape .chat-display */
 .msg {
     max-width: 72%;
     padding: 13px 17px;
@@ -512,6 +613,8 @@ body {
     opacity: 0;
     transform: translateY(12px) scale(0.95);
     word-break: break-word;
+    position: relative;   /* ← FIX: isolates animation stacking context */
+    z-index: 1;           /* ← FIX: keeps messages inside chat-display z-layer */
 }
 
 .msg.user {
@@ -600,6 +703,8 @@ body {
     backdrop-filter: blur(12px);
     animation: popIn 0.3s ease forwards;
     opacity: 0;
+    position: relative;
+    z-index: 1;
 }
 
 .typing-dot {
@@ -622,6 +727,8 @@ body {
 .input-section {
     padding: 0 24px 20px;
     flex-shrink: 0;
+    position: relative;
+    z-index: 10;
 }
 
 /* ---- File Preview Bar ---- */
@@ -796,7 +903,6 @@ body {
     border-color: var(--glass-border);
 }
 
-/* Attach btn */
 .attach-btn:hover { color: var(--primary); }
 
 /* Mic Button States */
@@ -959,9 +1065,7 @@ body {
 
     .chat-header { padding: 0 16px; }
 
-    .chat-display {
-        padding: 18px 18px;
-    }
+    .chat-display { padding: 18px 18px; }
 
     .input-section { padding: 0 14px 16px; }
 
@@ -970,6 +1074,13 @@ body {
     .feature-pills { gap: 6px; }
 
     .pill { font-size: 11px; padding: 5px 10px; }
+
+    /* Hide username text on very small screens, show only avatar */
+    .user-first-name { display: none; }
+    .user-profile-badge { padding: 4px; }
+
+    .auth-login-btn span { display: none; }
+    .auth-login-btn { padding: 7px 10px; }
 }
 
 @media (max-width: 480px) {

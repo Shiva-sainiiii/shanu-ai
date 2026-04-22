@@ -44,6 +44,15 @@
                 </div>
             </div>
 
+            <!-- User Info Panel (shown when logged in) -->
+            <div class="sidebar-user-panel" id="sidebarUserPanel" style="display:none;">
+                <img class="sidebar-user-avatar" id="sidebarUserAvatar" src="" alt="User">
+                <div class="sidebar-user-info">
+                    <span class="sidebar-user-name" id="sidebarUserName">User</span>
+                    <span class="sidebar-user-email" id="sidebarUserEmail">user@email.com</span>
+                </div>
+            </div>
+
             <nav class="sidebar-nav">
                 <button class="nav-item active" id="newChatBtn">
                     <i class="fa-solid fa-plus"></i>
@@ -61,6 +70,10 @@
                 </button>
                 <button class="icon-btn" id="clearBtn" title="Clear History">
                     <i class="fa-solid fa-trash-can"></i>
+                </button>
+                <!-- Logout (shown when logged in) -->
+                <button class="icon-btn" id="logoutBtn" title="Sign out" style="display:none;">
+                    <i class="fa-solid fa-right-from-bracket"></i>
                 </button>
             </div>
         </aside>
@@ -91,6 +104,21 @@
                         <span class="dot pulse-dot"></span>
                         <span>Online</span>
                     </div>
+
+                    <!-- Auth Section -->
+                    <div class="auth-section">
+                        <!-- Guest: shown by default -->
+                        <button class="glass-btn auth-login-btn" id="loginBtn" title="Sign in with Google">
+                            <i class="fa-brands fa-google" style="color:#EA4335;"></i>
+                            <span>Sign In</span>
+                        </button>
+
+                        <!-- Logged-in: hidden by default -->
+                        <div class="user-profile-badge" id="userProfileBadge" style="display:none;">
+                            <img class="user-avatar-header" id="userAvatarHeader" src="" alt="User" title="">
+                            <span class="user-first-name" id="userFirstName"></span>
+                        </div>
+                    </div>
                 </div>
             </header>
 
@@ -108,6 +136,7 @@
                         <span class="pill"><i class="fa-solid fa-file-pdf"></i> PDF Scan</span>
                         <span class="pill"><i class="fa-solid fa-microphone"></i> Voice Input</span>
                         <span class="pill"><i class="fa-solid fa-masks-theater"></i> 8 Moods</span>
+                        <span class="pill"><i class="fa-brands fa-google"></i> Google Login</span>
                     </div>
                 </div>
             </section>
