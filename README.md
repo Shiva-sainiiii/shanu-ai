@@ -14,7 +14,7 @@
 
 Developed with ❤️ by **[Shiva Saini](https://github.com/shiva-sainiiii)**
 
-[Live Demo](#) • [Report Bug](https://github.com/shiva-sainiiii/shanu-ai/issues) • [Request Feature](https://github.com/shiva-sainiiii/shanu-ai/issues)
+[Live Demo](https://shanu-ai-iota.vercel.app/) • [Report Bug](https://github.com/shiva-sainiiii/shanu-ai/issues) • [Request Feature](https://github.com/shiva-sainiiii/shanu-ai/issues)
 
 </div>
 
