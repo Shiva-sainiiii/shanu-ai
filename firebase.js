@@ -1,90 +1,110 @@
 // ==========================================
-// Shanu AI - Firebase Configuration & Helpers
+// Shanu AI — Firebase Configuration & Helpers v2
 // Developer: Shiva Saini
 // ==========================================
 
-import { initializeApp } from "https://www.gstatic.com/firebasejs/12.12.1/firebase-app.js";
-import { 
-    getFirestore, 
-    collection, 
-    addDoc, 
-    query, 
-    where, 
-    orderBy, 
-    limit, 
+import { initializeApp }       from "https://www.gstatic.com/firebasejs/12.12.1/firebase-app.js";
+import {
+    getFirestore,
+    collection,
+    addDoc,
+    query,
+    where,
+    orderBy,
+    limit,
     getDocs,
     deleteDoc,
-    doc
+    doc,
+    serverTimestamp
 } from "https://www.gstatic.com/firebasejs/12.12.1/firebase-firestore.js";
 
-// 1. Firebase Config (Tera project details)
+// ---- Firebase Project Config ----
+// Replace with your own project credentials from Firebase Console
 const firebaseConfig = {
-    apiKey: "AIzaSyCBAQgLhVaNcH1YS_qldqKTJ9Kg-JO9A74",
-    authDomain: "shanu-ai.firebaseapp.com",
-    projectId: "shanu-ai",
-    storageBucket: "shanu-ai.firebasestorage.app",
+    apiKey:            "AIzaSyCBAQgLhVaNcH1YS_qldqKTJ9Kg-JO9A74",
+    authDomain:        "shanu-ai.firebaseapp.com",
+    projectId:         "shanu-ai",
+    storageBucket:     "shanu-ai.firebasestorage.app",
     messagingSenderId: "225114447873",
-    appId: "1:225114447873:web:408763c5b259506506a000"
+    appId:             "1:225114447873:web:408763c5b259506506a000"
 };
 
-// Initialize Firebase
+// Initialize
 const app = initializeApp(firebaseConfig);
-const db = getFirestore(app);
+const db  = getFirestore(app);
 
-// Session ID logic (Unique for every user)
+// ---- Session ID ----
+// Unique per browser — persists across page refreshes
 let sessionId = localStorage.getItem("shanu_session_id");
 if (!sessionId) {
-    sessionId = "session_" + Math.random().toString(36).substr(2, 9);
+    sessionId = "session_" + Date.now() + "_" + Math.random().toString(36).substr(2, 7);
     localStorage.setItem("shanu_session_id", sessionId);
 }
 
-// ------------------------------------------
+// ==========================================
 // Exported Helper Functions
-// ------------------------------------------
+// ==========================================
 
 /**
- * Firestore me message save karne ke liye
+ * Save a single message to Firestore
+ * @param {string} role    - "user" or "assistant"
+ * @param {string} content - Message text
  */
 export async function saveMessageToDB(role, content) {
     try {
+        // Truncate very long file-context messages before saving (3500 char cap)
+        const safeContent = content.length > 3500 ? content.slice(0, 3500) + "\n...[truncated]" : content;
+
         await addDoc(collection(db, "chats"), {
-            sessionId: sessionId,
-            role: role,
-            content: content,
-            timestamp: new Date()
+            sessionId,
+            role,
+            content: safeContent,
+            timestamp: serverTimestamp()   // Use server timestamp for consistency
         });
     } catch (e) {
-        console.error("Firestore Save Error:", e);
+        // Non-fatal — app still works without save
+        console.warn("Firestore Save Warning:", e.message);
     }
 }
 
 /**
- * Purani chat history load karne ke liye
+ * Load recent chat history for the current session
+ * @param {number} limitCount - How many messages to fetch (default: 20)
+ * @returns {Array} Array of { role, content } objects
  */
 export async function loadHistoryFromDB(limitCount = 20) {
     try {
         const q = query(
             collection(db, "chats"),
             where("sessionId", "==", sessionId),
-            orderBy("timestamp", "asc"), // IMP: Console me jaakar Index create karna padega
+            orderBy("timestamp", "asc"),
+            // ↑ NOTE: First time use may throw an index error in console.
+            //   Follow the link in the error to create the Firestore composite index.
+            //   This is a one-time setup. Details in README.md.
             limit(limitCount)
         );
 
         const snapshot = await getDocs(q);
-        let messages = [];
-        snapshot.forEach((doc) => {
-            messages.push(doc.data());
-        });
+        const messages = [];
+        snapshot.forEach(d => messages.push(d.data()));
         return messages;
+
     } catch (e) {
-        console.error("Firestore Load Error:", e);
-        // Agar Index nahi bana hoga toh error aayega, tab tak empty array bhej rahe hain
+        // If index hasn't been created yet, silently fail and return empty array
+        if (e.code === "failed-precondition" || e.message?.includes("index")) {
+            console.warn(
+                "⚠️ Firestore index missing. Please create it using the link in the browser console error.",
+                "\nChat history will be empty until the index is ready."
+            );
+        } else {
+            console.error("Firestore Load Error:", e);
+        }
         return [];
     }
 }
 
 /**
- * Poori chat delete karne ke liye
+ * Delete all messages for the current session and reset the session ID
  */
 export async function clearSessionDB() {
     try {
@@ -93,20 +113,24 @@ export async function clearSessionDB() {
             where("sessionId", "==", sessionId)
         );
         const snapshot = await getDocs(q);
-        
-        // Ek-ek karke saare messages delete karna (Firestore limitation)
+
+        // Batch delete all documents
         const deletePromises = snapshot.docs.map(d => deleteDoc(doc(db, "chats", d.id)));
         await Promise.all(deletePromises);
-        
-        // Session ID reset kar dete hain taaki fresh start ho
-        const newId = "session_" + Math.random().toString(36).substr(2, 9);
+
+        // Generate fresh session ID
+        const newId = "session_" + Date.now() + "_" + Math.random().toString(36).substr(2, 7);
         localStorage.setItem("shanu_session_id", newId);
-        location.reload(); // Page reload taaki state clear ho jaye
-        
+
+        // Reload to reset all state cleanly
+        location.reload();
+
     } catch (e) {
         console.error("Firestore Clear Error:", e);
+        // Reload anyway — worst case is messages aren't deleted from Firestore
+        location.reload();
     }
 }
 
-// Database instance export (In case specific needs)
+// Export db instance for any direct usage
 export { db };
