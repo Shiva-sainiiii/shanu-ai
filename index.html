@@ -9,11 +9,23 @@
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 
-    <!-- PDF.js -->
+    <!-- Highlight.js — Syntax Highlighting (dark theme) -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+
+    <!-- PDF.js — PDF Text Extraction -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 
-    <!-- Tesseract.js v4 OCR -->
+    <!-- Tesseract.js v4 — Image OCR -->
     <script src="https://unpkg.com/tesseract.js@4/dist/tesseract.min.js"></script>
+
+    <!-- marked.js — Markdown Rendering -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+
+    <!-- highlight.js — Syntax Highlighting Engine -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+
+    <!-- jsPDF — Client-side PDF Generation -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 
     <link rel="stylesheet" href="style.css">
 </head>
@@ -44,15 +56,6 @@
                 </div>
             </div>
 
-            <!-- User Info Panel (shown when logged in) -->
-            <div class="sidebar-user-panel" id="sidebarUserPanel" style="display:none;">
-                <img class="sidebar-user-avatar" id="sidebarUserAvatar" src="" alt="User">
-                <div class="sidebar-user-info">
-                    <span class="sidebar-user-name" id="sidebarUserName">User</span>
-                    <span class="sidebar-user-email" id="sidebarUserEmail">user@email.com</span>
-                </div>
-            </div>
-
             <nav class="sidebar-nav">
                 <button class="nav-item active" id="newChatBtn">
                     <i class="fa-solid fa-plus"></i>
@@ -71,10 +74,6 @@
                 <button class="icon-btn" id="clearBtn" title="Clear History">
                     <i class="fa-solid fa-trash-can"></i>
                 </button>
-                <!-- Logout (shown when logged in) -->
-                <button class="icon-btn" id="logoutBtn" title="Sign out" style="display:none;">
-                    <i class="fa-solid fa-right-from-bracket"></i>
-                </button>
             </div>
         </aside>
 
@@ -87,7 +86,6 @@
             <!-- Header -->
             <header class="chat-header">
                 <div class="header-left">
-                    <!-- Mobile sidebar toggle -->
                     <button class="icon-btn mobile-menu-btn" id="menuBtn" title="Menu">
                         <i class="fa-solid fa-bars"></i>
                     </button>
@@ -103,21 +101,6 @@
                     <div class="status-indicator">
                         <span class="dot pulse-dot"></span>
                         <span>Online</span>
-                    </div>
-
-                    <!-- Auth Section -->
-                    <div class="auth-section">
-                        <!-- Guest: shown by default -->
-                        <button class="glass-btn auth-login-btn" id="loginBtn" title="Sign in with Google">
-                            <i class="fa-brands fa-google" style="color:#EA4335;"></i>
-                            <span>Sign In</span>
-                        </button>
-
-                        <!-- Logged-in: hidden by default -->
-                        <div class="user-profile-badge" id="userProfileBadge" style="display:none;">
-                            <img class="user-avatar-header" id="userAvatarHeader" src="" alt="User" title="">
-                            <span class="user-first-name" id="userFirstName"></span>
-                        </div>
                     </div>
                 </div>
             </header>
@@ -136,7 +119,8 @@
                         <span class="pill"><i class="fa-solid fa-file-pdf"></i> PDF Scan</span>
                         <span class="pill"><i class="fa-solid fa-microphone"></i> Voice Input</span>
                         <span class="pill"><i class="fa-solid fa-masks-theater"></i> 8 Moods</span>
-                        <span class="pill"><i class="fa-brands fa-google"></i> Google Login</span>
+                        <span class="pill"><i class="fa-solid fa-code"></i> Markdown</span>
+                        <span class="pill"><i class="fa-solid fa-file-arrow-down"></i> PDF Export</span>
                     </div>
                 </div>
             </section>
@@ -181,12 +165,10 @@
 
                         <!-- Right actions -->
                         <div class="action-buttons">
-                            <!-- Mic Button -->
                             <button class="icon-action-btn mic-btn" id="micBtn" title="Voice input">
                                 <i class="fa-solid fa-microphone" id="micIcon"></i>
                                 <span class="mic-ring"></span>
                             </button>
-                            <!-- Send Button -->
                             <button id="sendBtn" class="send-btn" title="Send">
                                 <i class="fa-solid fa-paper-plane" id="sendIcon"></i>
                             </button>
@@ -205,7 +187,7 @@
         <span id="toastMsg">Message here</span>
     </div>
 
-    <!-- Scripts (module type for firebase/chat) -->
+    <!-- Scripts -->
     <script type="module" src="firebase.js"></script>
     <script type="module" src="chat.js"></script>
 </body>
