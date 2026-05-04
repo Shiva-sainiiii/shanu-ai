@@ -1243,3 +1243,218 @@ body {
     .msg-actions { gap: 6px; }
     .msg-action-btn { font-size: 11px; padding: 4px 10px; }
 }
+/* ============================================================
+   Shanu AI v3 — APPEND THIS TO THE END OF style.css
+   New: Multi-file chips, Chart wrap, Preview Modal, Action pills
+   ============================================================ */
+
+/* ---- Multi-File List ---- */
+.multi-file-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 4px;
+}
+
+.multi-file-list .file-chip {
+    animation: slideDown 0.2s ease both;
+}
+
+/* File type icon overrides */
+.file-chip-icon.code {
+    background: rgba(99, 102, 241, 0.12);
+    color: var(--secondary);
+}
+
+/* ---- Chart Container (appears as a bot message) ---- */
+.chart-wrap {
+    align-self: flex-start;
+    background: var(--bot-msg);
+    border: 1px solid var(--glass-border);
+    border-radius: 18px;
+    border-bottom-left-radius: 4px;
+    padding: 16px;
+    max-width: 520px;
+    width: 95%;
+    margin-bottom: 16px;
+    backdrop-filter: blur(12px);
+    box-shadow: var(--shadow-sm);
+    animation: popIn 0.35s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+    opacity: 0;
+}
+
+.chart-wrap-label {
+    font-size: 10.5px;
+    color: var(--text-muted);
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    font-weight: 600;
+}
+
+/* ---- Action Result Pill (shown after PDF/PPT/Preview) ---- */
+.action-result-pill {
+    align-self: flex-start;
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 7px 16px;
+    background: rgba(16, 185, 129, 0.1);
+    border: 1px solid rgba(16, 185, 129, 0.22);
+    border-radius: var(--radius-xl);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--accent-green);
+    margin-bottom: 14px;
+    animation: fadeSlideUp 0.3s ease both;
+}
+
+.action-result-pill i { font-size: 11px; }
+
+/* ---- Live Preview Modal ---- */
+.preview-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 600;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s ease;
+}
+
+.preview-modal.show {
+    opacity: 1;
+    pointer-events: all;
+}
+
+.preview-modal-backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.78);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+}
+
+.preview-modal-inner {
+    position: relative;
+    width: 100%;
+    max-width: 960px;
+    height: 87vh;
+    display: flex;
+    flex-direction: column;
+    background: rgba(8, 12, 24, 0.95);
+    border: 1px solid var(--glass-border-h);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    box-shadow: var(--shadow-lg), 0 0 0 1px rgba(0,229,255,0.06);
+    transform: translateY(20px) scale(0.97);
+    transition: transform 0.35s cubic-bezier(0.175, 0.885, 0.32, 1.275),
+                opacity 0.35s ease;
+    opacity: 0;
+}
+
+.preview-modal.show .preview-modal-inner {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+}
+
+.preview-modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 13px 18px;
+    border-bottom: 1px solid var(--glass-border);
+    flex-shrink: 0;
+    background: rgba(0,0,0,0.2);
+}
+
+.preview-modal-title {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    font-size: 13.5px;
+    font-weight: 700;
+    color: var(--text-main);
+}
+
+.preview-badge {
+    font-size: 10px;
+    font-weight: 600;
+    padding: 2px 8px;
+    background: var(--primary-dim);
+    color: var(--primary);
+    border-radius: 20px;
+    letter-spacing: 0.4px;
+    border: 1px solid rgba(0,229,255,0.2);
+}
+
+.preview-modal-actions {
+    display: flex;
+    gap: 2px;
+}
+
+.preview-frame-wrap {
+    flex: 1;
+    overflow: hidden;
+    background: #ffffff;
+    position: relative;
+}
+
+#previewFrame {
+    width: 100%;
+    height: 100%;
+    border: none;
+    display: block;
+}
+
+/* ---- Inline code in bot messages ---- */
+.msg.bot code {
+    background: rgba(0, 229, 255, 0.08);
+    border: 1px solid rgba(0, 229, 255, 0.12);
+    border-radius: 5px;
+    padding: 1px 5px;
+    font-family: 'Courier New', monospace;
+    font-size: 12.5px;
+    color: var(--primary);
+}
+
+/* ---- Processing status badge in chip ---- */
+.file-chip-status.processing {
+    color: var(--primary);
+    animation: statusBlink 1s infinite;
+}
+
+.file-chip-status.done { color: var(--accent-green); }
+.file-chip-status.error { color: var(--accent-red); }
+
+@keyframes statusBlink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+/* ---- Mobile adjustments ---- */
+@media (max-width: 768px) {
+    .preview-modal {
+        padding: 0;
+        align-items: flex-end;
+    }
+
+    .preview-modal-inner {
+        height: 90vh;
+        max-width: 100%;
+        border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+        border-bottom: none;
+    }
+
+    .chart-wrap {
+        max-width: 100%;
+        width: 100%;
+    }
+   }
+
