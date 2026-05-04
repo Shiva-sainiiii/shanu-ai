@@ -9,23 +9,19 @@
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 
-    <!-- Highlight.js — Syntax Highlighting (dark theme) -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
-
-    <!-- PDF.js — PDF Text Extraction -->
+    <!-- PDF.js — PDF extraction -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 
     <!-- Tesseract.js v4 — Image OCR -->
     <script src="https://unpkg.com/tesseract.js@4/dist/tesseract.min.js"></script>
 
-    <!-- marked.js — Markdown Rendering -->
-    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-
-    <!-- highlight.js — Syntax Highlighting Engine -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
-
-    <!-- jsPDF — Client-side PDF Generation -->
+    <!-- ✨ ACTION ENGINE LIBRARIES (CDN — no npm needed) -->
+    <!-- jsPDF — Generate downloadable PDFs -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <!-- PptxGenJS — Generate PowerPoint presentations -->
+    <script src="https://cdn.jsdelivr.net/npm/pptxgenjs@3.12.0/dist/pptxgen.bundle.js"></script>
+    <!-- Chart.js — Render charts and graphs -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 
     <link rel="stylesheet" href="style.css">
 </head>
@@ -113,14 +109,14 @@
                         <div class="welcome-ring"></div>
                     </div>
                     <h1>Shanu AI se baatein karein</h1>
-                    <p>Experience next-level Hinglish AI. Upload images, PDFs, or speak your message.</p>
+                    <p>Upload code, images, or PDFs. Ask for charts, slides, live previews — Shanu AI banayega sab!</p>
                     <div class="feature-pills">
-                        <span class="pill"><i class="fa-solid fa-image"></i> Image OCR</span>
-                        <span class="pill"><i class="fa-solid fa-file-pdf"></i> PDF Scan</span>
-                        <span class="pill"><i class="fa-solid fa-microphone"></i> Voice Input</span>
-                        <span class="pill"><i class="fa-solid fa-masks-theater"></i> 8 Moods</span>
-                        <span class="pill"><i class="fa-solid fa-code"></i> Markdown</span>
-                        <span class="pill"><i class="fa-solid fa-file-arrow-down"></i> PDF Export</span>
+                        <span class="pill"><i class="fa-solid fa-code"></i> Code Reader</span>
+                        <span class="pill"><i class="fa-solid fa-file-pdf"></i> PDF Export</span>
+                        <span class="pill"><i class="fa-solid fa-chart-bar"></i> Charts</span>
+                        <span class="pill"><i class="fa-solid fa-display"></i> Live Preview</span>
+                        <span class="pill"><i class="fa-solid fa-file-powerpoint"></i> Slides</span>
+                        <span class="pill"><i class="fa-solid fa-microphone"></i> Voice</span>
                     </div>
                 </div>
             </section>
@@ -128,21 +124,11 @@
             <!-- ===== INPUT SECTION ===== -->
             <footer class="input-section">
 
-                <!-- File Preview Bar -->
+                <!-- ✨ Multi-File Preview Bar -->
                 <div class="file-preview-bar" id="filePreviewBar">
-                    <div class="file-chip" id="fileChip">
-                        <div class="file-chip-icon" id="fileChipIcon">
-                            <i class="fa-solid fa-file-image"></i>
-                        </div>
-                        <div class="file-chip-info">
-                            <span class="file-chip-name" id="fileChipName">filename.jpg</span>
-                            <span class="file-chip-status" id="fileChipStatus">Ready to send</span>
-                        </div>
-                        <button class="file-chip-remove" id="removeFileBtn" title="Remove">
-                            <i class="fa-solid fa-xmark"></i>
-                        </button>
-                    </div>
-                    <!-- OCR Progress -->
+                    <!-- All file chips render here dynamically -->
+                    <div class="multi-file-list" id="multiFileList"></div>
+                    <!-- OCR/Processing Progress -->
                     <div class="ocr-progress-bar" id="ocrProgressBar">
                         <div class="ocr-progress-fill" id="ocrProgressFill"></div>
                     </div>
@@ -153,22 +139,36 @@
                     <div class="input-bar glass-card" id="inputBar">
 
                         <!-- Attach Button -->
-                        <button class="icon-action-btn attach-btn" id="attachBtn" title="Attach file (Image / PDF / TXT)">
+                        <button class="icon-action-btn attach-btn" id="attachBtn"
+                            title="Attach files (Images, PDFs, Code — .py .js .c .cpp .java etc.)">
                             <i class="fa-solid fa-paperclip"></i>
                         </button>
 
-                        <!-- Hidden file input -->
-                        <input type="file" id="fileInput" accept="image/*,.pdf,.txt,.csv" hidden>
+                        <!--
+                            ✨ UPDATED: multiple + all code file types accepted
+                            User can select multiple files at once
+                        -->
+                        <input type="file" id="fileInput"
+                            accept="image/*,.pdf,.txt,.csv,.md,
+                                    .c,.cpp,.h,.hpp,.cs,.java,
+                                    .py,.js,.ts,.jsx,.tsx,
+                                    .html,.css,.scss,.sass,
+                                    .php,.rb,.go,.rs,.swift,.kt,
+                                    .r,.sql,.sh,.bash,.zsh,
+                                    .json,.xml,.yaml,.yml,.toml,.ini"
+                            multiple hidden>
 
                         <!-- Textarea -->
                         <textarea id="inputBox" placeholder="Message Shanu AI..." rows="1"></textarea>
 
                         <!-- Right actions -->
                         <div class="action-buttons">
+                            <!-- Mic Button -->
                             <button class="icon-action-btn mic-btn" id="micBtn" title="Voice input">
                                 <i class="fa-solid fa-microphone" id="micIcon"></i>
                                 <span class="mic-ring"></span>
                             </button>
+                            <!-- Send Button -->
                             <button id="sendBtn" class="send-btn" title="Send">
                                 <i class="fa-solid fa-paper-plane" id="sendIcon"></i>
                             </button>
@@ -181,13 +181,44 @@
         </main>
     </div>
 
+    <!-- ===== ✨ LIVE PREVIEW MODAL ===== -->
+    <div class="preview-modal" id="previewModal">
+        <!-- Click backdrop to close -->
+        <div class="preview-modal-backdrop" id="previewModalBackdrop"></div>
+
+        <div class="preview-modal-inner">
+            <div class="preview-modal-header">
+                <div class="preview-modal-title">
+                    <i class="fa-solid fa-eye" style="color:var(--primary)"></i>
+                    <span>Live Preview</span>
+                    <span class="preview-badge">AI Generated</span>
+                </div>
+                <div class="preview-modal-actions">
+                    <button class="icon-btn" id="previewCopyBtn" title="Copy HTML source">
+                        <i class="fa-solid fa-copy"></i>
+                    </button>
+                    <button class="icon-btn" id="previewDownloadBtn" title="Download as HTML file">
+                        <i class="fa-solid fa-download"></i>
+                    </button>
+                    <button class="icon-btn" id="closePreviewBtn" title="Close preview">
+                        <i class="fa-solid fa-xmark"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="preview-frame-wrap">
+                <!-- sandbox allows scripts but blocks external navigation -->
+                <iframe id="previewFrame" sandbox="allow-scripts allow-same-origin"></iframe>
+            </div>
+        </div>
+    </div>
+
     <!-- ===== TOAST NOTIFICATION ===== -->
     <div class="toast" id="toast">
         <i class="fa-solid fa-circle-info"></i>
         <span id="toastMsg">Message here</span>
     </div>
 
-    <!-- Scripts -->
+    <!-- Scripts (module type for firebase/chat) -->
     <script type="module" src="firebase.js"></script>
     <script type="module" src="chat.js"></script>
 </body>
