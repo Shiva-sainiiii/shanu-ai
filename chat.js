@@ -187,10 +187,52 @@ function addMessage(text, type = "bot", parseActions = true) {
     const div = document.createElement("div");
     div.className = `msg ${type}`;
 
-    if (type === "bot" && parseActions) {
-        const { cleanText, indicator } = parseAndExecuteActions(text);
-        div.textContent = cleanText;
+    if (type === "bot") {
+        const rawText = parseActions ? parseAndExecuteActions(text).cleanText : text;
+        const indicator = parseActions ? parseAndExecuteActions(text).indicator : null;
+
+        // Render rich markdown content (code blocks + inline formatting)
+        div.innerHTML = renderBotMarkdown(rawText);
+
+        // ── Copy button (always shown on bot messages) ──────
+        const copyBtn = document.createElement("button");
+        copyBtn.className = "msg-copy-btn";
+        copyBtn.title = "Copy message";
+        copyBtn.innerHTML = `<i class="fa-regular fa-copy"></i>`;
+        copyBtn.addEventListener("click", () => {
+            navigator.clipboard.writeText(rawText).then(() => {
+                copyBtn.innerHTML = `<i class="fa-solid fa-check"></i>`;
+                copyBtn.classList.add("copied");
+                setTimeout(() => {
+                    copyBtn.innerHTML = `<i class="fa-regular fa-copy"></i>`;
+                    copyBtn.classList.remove("copied");
+                }, 1800);
+            });
+        });
+        div.appendChild(copyBtn);
         chatBox.appendChild(div);
+
+        // Apply highlight.js to all code blocks inside this message
+        div.querySelectorAll("pre code").forEach(block => {
+            if (window.hljs) hljs.highlightElement(block);
+        });
+
+        // Attach per-block copy buttons after hljs runs
+        div.querySelectorAll(".code-block-wrap").forEach(wrap => {
+            const btn = wrap.querySelector(".code-copy-btn");
+            const code = wrap.querySelector("code");
+            btn?.addEventListener("click", () => {
+                navigator.clipboard.writeText(code.innerText).then(() => {
+                    btn.innerHTML = `<i class="fa-solid fa-check"></i> Copied!`;
+                    btn.classList.add("copied");
+                    setTimeout(() => {
+                        btn.innerHTML = `<i class="fa-regular fa-copy"></i> Copy`;
+                        btn.classList.remove("copied");
+                    }, 1800);
+                });
+            });
+        });
+
         if (indicator) {
             const pill = document.createElement("div");
             pill.className = "action-result-pill";
@@ -198,12 +240,72 @@ function addMessage(text, type = "bot", parseActions = true) {
             chatBox.appendChild(pill);
         }
     } else {
+        // User messages — plain text only
         div.textContent = text;
         chatBox.appendChild(div);
     }
 
     scrollToBottom();
     return div;
+}
+
+/**
+ * Converts bot response text into rich HTML.
+ * Handles: fenced code blocks, inline code, bold, italic, plain text.
+ * Keeps action tags stripped (they're already handled).
+ */
+function renderBotMarkdown(text) {
+    // Split on fenced code blocks: ```lang\n...code...\n```
+    const parts = text.split(/(```[\s\S]*?```)/g);
+
+    return parts.map(part => {
+        // ── Fenced code block ───────────────────────────────
+        const fenceMatch = part.match(/^```(\w*)\n?([\s\S]*?)```$/);
+        if (fenceMatch) {
+            const lang    = fenceMatch[1]?.trim() || "plaintext";
+            const code    = escapeHtml(fenceMatch[2] || "");
+            const langLabel = lang !== "plaintext" ? lang : "code";
+            return `
+<div class="code-block-wrap">
+    <div class="code-block-header">
+        <span class="code-lang-label">${langLabel}</span>
+        <button class="code-copy-btn">
+            <i class="fa-regular fa-copy"></i> Copy
+        </button>
+    </div>
+    <pre><code class="language-${lang}">${code}</code></pre>
+</div>`;
+        }
+
+        // ── Plain text segment — apply inline markdown ──────
+        let html = escapeHtml(part);
+
+        // Inline code: `code`
+        html = html.replace(/`([^`]+)`/g,
+            (_, c) => `<code class="inline-code">${c}</code>`);
+
+        // Bold: **text** or __text__
+        html = html.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+        html = html.replace(/__(.+?)__/g,      "<strong>$1</strong>");
+
+        // Italic: *text* or _text_
+        html = html.replace(/\*([^*]+)\*/g, "<em>$1</em>");
+        html = html.replace(/_([^_]+)_/g,   "<em>$1</em>");
+
+        // Preserve newlines as <br>
+        html = html.replace(/\n/g, "<br>");
+
+        return html;
+    }).join("");
+}
+
+/** Safely escape HTML special chars before injecting into DOM */
+function escapeHtml(str) {
+    return str
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
 }
 
 function addFileBubbles() {
