@@ -1,11 +1,25 @@
 // ==========================================
-// Shanu AI — Chat Logic v3
+// Shanu AI — Chat Logic v4 (MERGED)
 // Developer: Shiva Saini
-// Action Engine: PDF | PPT | Chart | Preview
-// Multi-file: Images (OCR) | PDFs | Code | Text
+//
+// RESTORED from old:
+//   ✅ marked.js — full GFM markdown rendering
+//   ✅ preprocessImage() — canvas OCR pipeline (better accuracy)
+//   ✅ initAuth + waitForAuth — Firebase auth race condition fix
+//   ✅ .copy-code-btn / .msg-actions — correct CSS class names
+//
+// KEPT from new:
+//   ✅ Multi-file upload (images, PDFs, code files)
+//   ✅ Action Engine: [PDF] [PPT] [CHART] [PREVIEW] tags
+//   ✅ jsPDF enhanced, PptxGenJS, Chart.js, Live Preview modal
+//
+// BUGS FIXED:
+//   ✅ parseAndExecuteActions() was called twice — PDF/PPT generated 2x
+//   ✅ Wrong CSS class .code-copy-btn → .copy-code-btn
+//   ✅ Wrong hljs theme (atom-one-dark → github-dark, matches CSS)
 // ==========================================
 
-import { saveMessageToDB, loadHistoryFromDB, clearSessionDB } from './firebase.js';
+import { saveMessageToDB, loadHistoryFromDB, clearSessionDB, initAuth, waitForAuth } from './firebase.js';
 
 // ------------------------------------------
 // 1. DOM References
@@ -24,7 +38,7 @@ const moodList         = document.getElementById("moodList");
 const currentMoodLabel = document.getElementById("currentMoodLabel");
 const recentMoods      = document.getElementById("recentMoods");
 
-// File Upload (multi-file)
+// File Upload
 const attachBtn        = document.getElementById("attachBtn");
 const fileInput        = document.getElementById("fileInput");
 const filePreviewBar   = document.getElementById("filePreviewBar");
@@ -40,37 +54,37 @@ const micIcon          = document.getElementById("micIcon");
 const toast            = document.getElementById("toast");
 const toastMsg         = document.getElementById("toastMsg");
 
-// Mobile sidebar
+// Mobile Sidebar
 const menuBtn          = document.getElementById("menuBtn");
 const sidebar          = document.getElementById("sidebar");
 const sidebarOverlay   = document.getElementById("sidebarOverlay");
 
-// Preview Modal
-const previewModal          = document.getElementById("previewModal");
-const previewFrame          = document.getElementById("previewFrame");
-const previewModalBackdrop  = document.getElementById("previewModalBackdrop");
-const closePreviewBtn       = document.getElementById("closePreviewBtn");
-const previewCopyBtn        = document.getElementById("previewCopyBtn");
-const previewDownloadBtn    = document.getElementById("previewDownloadBtn");
+// Live Preview Modal
+const previewModal         = document.getElementById("previewModal");
+const previewFrame         = document.getElementById("previewFrame");
+const previewModalBackdrop = document.getElementById("previewModalBackdrop");
+const closePreviewBtn      = document.getElementById("closePreviewBtn");
+const previewCopyBtn       = document.getElementById("previewCopyBtn");
+const previewDownloadBtn   = document.getElementById("previewDownloadBtn");
 
 // ------------------------------------------
 // 2. Application State
 // ------------------------------------------
-let currentMood   = "normal";
-let sending       = false;
-let chatContext   = [];           // Full conversation for API
-let selectedFiles = [];           // [{ file: File, status: string }]
-let isRecording   = false;
-let recognition   = null;
-let toastTimer    = null;
-let lastPreviewHTML = "";         // For copy/download buttons
+let currentMood     = "normal";
+let sending         = false;
+let chatContext     = [];
+let selectedFiles   = [];      // [{ file: File, status: string }]
+let isRecording     = false;
+let recognition     = null;
+let toastTimer      = null;
+let lastPreviewHTML = "";
 
-// Code extensions — read as plain text, wrapped in code fences
+// Code file extensions — read as text, wrapped in fenced blocks for AI
 const CODE_EXTS = new Set([
     'c','cpp','h','hpp','cs','java','py','js','ts','jsx','tsx',
     'html','css','scss','sass','php','rb','go','rs','swift','kt',
     'r','sql','sh','bash','zsh','json','xml','yaml','yml',
-    'toml','ini','cfg','env','makefile','dockerfile','gradle'
+    'toml','ini','cfg','env','md','makefile','dockerfile','gradle'
 ]);
 
 const MOODS = [
@@ -85,7 +99,20 @@ const MOODS = [
 ];
 
 // ------------------------------------------
-// 3. Toast Notification
+// 3. Configure marked.js (RESTORED)
+//    Full GFM: tables, lists, blockquotes, headings, links
+// ------------------------------------------
+if (window.marked) {
+    marked.setOptions({
+        breaks:    true,    // \n → <br>
+        gfm:       true,    // GitHub Flavored Markdown
+        headerIds: false,   // No auto-IDs (security)
+        mangle:    false
+    });
+}
+
+// ------------------------------------------
+// 4. Toast
 // ------------------------------------------
 function showToast(msg, duration = 3200) {
     toastMsg.textContent = msg;
@@ -95,7 +122,7 @@ function showToast(msg, duration = 3200) {
 }
 
 // ------------------------------------------
-// 4. Mood Dropdown
+// 5. Mood Dropdown
 // ------------------------------------------
 MOODS.forEach(m => {
     const div = document.createElement("div");
@@ -112,10 +139,10 @@ MOODS.forEach(m => {
     moodList.appendChild(div);
 });
 
-moodBtn.addEventListener("click", (e) => {
+moodBtn.addEventListener("click", e => {
     e.stopPropagation();
-    const isOpen = moodList.classList.toggle("show");
-    moodBtn.classList.toggle("open", isOpen);
+    moodList.classList.toggle("show");
+    moodBtn.classList.toggle("open", moodList.classList.contains("show"));
 });
 
 document.addEventListener("click", () => {
@@ -139,7 +166,7 @@ function addToRecentMoods(moodObj) {
 }
 
 // ------------------------------------------
-// 5. Mobile Sidebar
+// 6. Mobile Sidebar
 // ------------------------------------------
 menuBtn?.addEventListener("click", () => {
     sidebar.classList.toggle("open");
@@ -151,14 +178,14 @@ sidebarOverlay?.addEventListener("click", () => {
 });
 
 // ------------------------------------------
-// 6. Input Auto-resize + Enter Key
+// 7. Input Resize + Enter Key
 // ------------------------------------------
 function resizeInput() {
     inputBox.style.height = "auto";
     inputBox.style.height = Math.min(inputBox.scrollHeight, 130) + "px";
 }
 inputBox.addEventListener("input", resizeInput);
-inputBox.addEventListener("keydown", (e) => {
+inputBox.addEventListener("keydown", e => {
     if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
         handleSendAction();
@@ -166,7 +193,7 @@ inputBox.addEventListener("keydown", (e) => {
 });
 
 // ------------------------------------------
-// 7. Chat UI Helpers
+// 8. Chat UI Helpers
 // ------------------------------------------
 function scrollToBottom() {
     chatBox.scrollTo({ top: chatBox.scrollHeight, behavior: "smooth" });
@@ -174,166 +201,6 @@ function scrollToBottom() {
 
 function hidePlaceholder() {
     if (emptyPlaceholder) emptyPlaceholder.style.display = "none";
-}
-
-/**
- * Add a message bubble to the chat.
- * @param {string} text - Message content
- * @param {"user"|"bot"} type
- * @param {boolean} parseActions - Set false when loading history (avoids re-triggering actions)
- */
-function addMessage(text, type = "bot", parseActions = true) {
-    hidePlaceholder();
-    const div = document.createElement("div");
-    div.className = `msg ${type}`;
-
-    if (type === "bot") {
-        const rawText = parseActions ? parseAndExecuteActions(text).cleanText : text;
-        const indicator = parseActions ? parseAndExecuteActions(text).indicator : null;
-
-        // Render rich markdown content (code blocks + inline formatting)
-        div.innerHTML = renderBotMarkdown(rawText);
-
-        // ── Copy button (always shown on bot messages) ──────
-        const copyBtn = document.createElement("button");
-        copyBtn.className = "msg-copy-btn";
-        copyBtn.title = "Copy message";
-        copyBtn.innerHTML = `<i class="fa-regular fa-copy"></i>`;
-        copyBtn.addEventListener("click", () => {
-            navigator.clipboard.writeText(rawText).then(() => {
-                copyBtn.innerHTML = `<i class="fa-solid fa-check"></i>`;
-                copyBtn.classList.add("copied");
-                setTimeout(() => {
-                    copyBtn.innerHTML = `<i class="fa-regular fa-copy"></i>`;
-                    copyBtn.classList.remove("copied");
-                }, 1800);
-            });
-        });
-        div.appendChild(copyBtn);
-        chatBox.appendChild(div);
-
-        // Apply highlight.js to all code blocks inside this message
-        div.querySelectorAll("pre code").forEach(block => {
-            if (window.hljs) hljs.highlightElement(block);
-        });
-
-        // Attach per-block copy buttons after hljs runs
-        div.querySelectorAll(".code-block-wrap").forEach(wrap => {
-            const btn = wrap.querySelector(".code-copy-btn");
-            const code = wrap.querySelector("code");
-            btn?.addEventListener("click", () => {
-                navigator.clipboard.writeText(code.innerText).then(() => {
-                    btn.innerHTML = `<i class="fa-solid fa-check"></i> Copied!`;
-                    btn.classList.add("copied");
-                    setTimeout(() => {
-                        btn.innerHTML = `<i class="fa-regular fa-copy"></i> Copy`;
-                        btn.classList.remove("copied");
-                    }, 1800);
-                });
-            });
-        });
-
-        if (indicator) {
-            const pill = document.createElement("div");
-            pill.className = "action-result-pill";
-            pill.innerHTML = indicator;
-            chatBox.appendChild(pill);
-        }
-    } else {
-        // User messages — plain text only
-        div.textContent = text;
-        chatBox.appendChild(div);
-    }
-
-    scrollToBottom();
-    return div;
-}
-
-/**
- * Converts bot response text into rich HTML.
- * Handles: fenced code blocks, inline code, bold, italic, plain text.
- * Keeps action tags stripped (they're already handled).
- */
-function renderBotMarkdown(text) {
-    // Split on fenced code blocks: ```lang\n...code...\n```
-    const parts = text.split(/(```[\s\S]*?```)/g);
-
-    return parts.map(part => {
-        // ── Fenced code block ───────────────────────────────
-        const fenceMatch = part.match(/^```(\w*)\n?([\s\S]*?)```$/);
-        if (fenceMatch) {
-            const lang    = fenceMatch[1]?.trim() || "plaintext";
-            const code    = escapeHtml(fenceMatch[2] || "");
-            const langLabel = lang !== "plaintext" ? lang : "code";
-            return `
-<div class="code-block-wrap">
-    <div class="code-block-header">
-        <span class="code-lang-label">${langLabel}</span>
-        <button class="code-copy-btn">
-            <i class="fa-regular fa-copy"></i> Copy
-        </button>
-    </div>
-    <pre><code class="language-${lang}">${code}</code></pre>
-</div>`;
-        }
-
-        // ── Plain text segment — apply inline markdown ──────
-        let html = escapeHtml(part);
-
-        // Inline code: `code`
-        html = html.replace(/`([^`]+)`/g,
-            (_, c) => `<code class="inline-code">${c}</code>`);
-
-        // Bold: **text** or __text__
-        html = html.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
-        html = html.replace(/__(.+?)__/g,      "<strong>$1</strong>");
-
-        // Italic: *text* or _text_
-        html = html.replace(/\*([^*]+)\*/g, "<em>$1</em>");
-        html = html.replace(/_([^_]+)_/g,   "<em>$1</em>");
-
-        // Preserve newlines as <br>
-        html = html.replace(/\n/g, "<br>");
-
-        return html;
-    }).join("");
-}
-
-/** Safely escape HTML special chars before injecting into DOM */
-function escapeHtml(str) {
-    return str
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;");
-}
-
-function addFileBubbles() {
-    hidePlaceholder();
-    const iconMap = { image: "fa-image", pdf: "fa-file-pdf", code: "fa-code", text: "fa-file-lines" };
-    const labelMap = {
-        image: "Image — OCR extracted",
-        pdf:   "PDF — text extracted",
-        code:  "Code file — analyzed",
-        text:  "Text file — read"
-    };
-    selectedFiles.forEach(item => {
-        const cat = getFileCategory(item.file.type, item.file.name);
-        const wrap = document.createElement("div");
-        wrap.className = "msg file-msg user";
-        wrap.innerHTML = `
-            <div class="file-msg-card">
-                <div class="file-msg-icon ${cat === "code" ? "text" : cat}">
-                    <i class="fa-solid ${iconMap[cat] || "fa-file"}"></i>
-                </div>
-                <div class="file-msg-info">
-                    <div class="file-msg-name">${item.file.name}</div>
-                    <div class="file-msg-sub">${labelMap[cat] || "Attached"}</div>
-                </div>
-            </div>`;
-        chatBox.appendChild(wrap);
-    });
-    scrollToBottom();
 }
 
 function showTyping() {
@@ -363,23 +230,155 @@ function unlockUI() {
 }
 
 // ------------------------------------------
-// 8. ✨ ACTION ENGINE — Smart Tag Parser
+// 9. ✅ FIXED addMessage
+//    Old bugs fixed:
+//    1. parseAndExecuteActions() was called twice — now called ONCE
+//    2. Uses marked.js (full markdown) instead of custom renderer
+//    3. Uses .copy-code-btn (matches style.css) not .code-copy-btn
+//    4. Uses .msg-actions bar (matches style.css)
+//    5. parseActions=false for history load (no re-triggering old actions)
 // ------------------------------------------
-/**
- * Parses AI response for [TAG]...[/TAG] blocks and triggers actions.
- * Returns cleaned text (without tags) + optional UI indicator.
- *
- * Supported tags:
- *   [PDF]content[/PDF]       → Downloads a PDF via jsPDF
- *   [PPT]json[/PPT]          → Downloads a PPTX via PptxGenJS
- *   [CHART]json[/CHART]      → Renders a Chart.js chart in chat
- *   [PREVIEW]html[/PREVIEW]  → Opens HTML in live preview modal
- */
+function addMessage(text, type = "bot", parseActions = true) {
+    hidePlaceholder();
+    const div = document.createElement("div");
+    div.className = `msg ${type}`;
+
+    if (type === "bot") {
+
+        // ── Step 1: Parse action tags ONCE (BUG FIX: was called twice before) ──
+        let displayText = text;
+        let indicator   = null;
+
+        if (parseActions) {
+            const parsed = parseAndExecuteActions(text);
+            displayText  = parsed.cleanText;
+            indicator    = parsed.indicator;
+        }
+
+        // ── Step 2: Render full markdown via marked.js (RESTORED) ──
+        if (window.marked) {
+            div.innerHTML = marked.parse(displayText);
+        } else {
+            // Fallback if marked.js fails to load
+            div.textContent = displayText;
+        }
+
+        // ── Step 3: Syntax highlight + copy button on each code block ──
+        //    marked.js generates <pre><code class="language-X">
+        //    We add .code-block-wrap to <pre> (matches CSS selector)
+        div.querySelectorAll("pre code").forEach(block => {
+            if (window.hljs) hljs.highlightElement(block);
+
+            const pre  = block.parentElement;
+            pre.classList.add("code-block-wrap");
+
+            // Extract language label from hljs-added classes
+            const lang = block.className
+                .replace(/language-/g, "")
+                .replace(/\s*hljs\s*/g, "")
+                .trim() || "code";
+
+            const header = document.createElement("div");
+            header.className = "code-block-header";
+            header.innerHTML = `
+                <span class="code-lang-label">${lang}</span>
+                <button class="copy-code-btn">
+                    <i class="fa-solid fa-copy"></i> Copy
+                </button>`;
+
+            // ✅ Class is .copy-code-btn — matches style.css
+            header.querySelector(".copy-code-btn").addEventListener("click", function () {
+                navigator.clipboard.writeText(block.innerText).then(() => {
+                    this.innerHTML = '<i class="fa-solid fa-check"></i> Copied!';
+                    setTimeout(() => {
+                        this.innerHTML = '<i class="fa-solid fa-copy"></i> Copy';
+                    }, 2000);
+                });
+            });
+
+            pre.insertBefore(header, block);
+        });
+
+        // ── Step 4: Response action bar — Copy Response ──
+        //    ✅ Uses .msg-actions + .msg-action-btn — matches style.css
+        const actionBar = document.createElement("div");
+        actionBar.className = "msg-actions";
+        actionBar.innerHTML = `
+            <button class="msg-action-btn copy-resp-btn" title="Copy full response">
+                <i class="fa-solid fa-copy"></i> Copy
+            </button>`;
+
+        actionBar.querySelector(".copy-resp-btn").addEventListener("click", function () {
+            navigator.clipboard.writeText(displayText).then(() => {
+                this.innerHTML = '<i class="fa-solid fa-check"></i> Copied!';
+                showToast("✅ Response copied!");
+                setTimeout(() => {
+                    this.innerHTML = '<i class="fa-solid fa-copy"></i> Copy';
+                }, 2000);
+            });
+        });
+
+        div.appendChild(actionBar);
+        chatBox.appendChild(div);
+
+        // ── Step 5: Action indicator pill (e.g. "PDF downloaded") ──
+        if (indicator) {
+            const pill = document.createElement("div");
+            pill.className = "action-result-pill";
+            pill.innerHTML = indicator;
+            chatBox.appendChild(pill);
+        }
+
+    } else {
+        // User messages — plain text only (no XSS risk)
+        div.textContent = text;
+        chatBox.appendChild(div);
+    }
+
+    scrollToBottom();
+    return div;
+}
+
+// ── File attachment bubble ────────────────────────────
+function addFileBubbles() {
+    hidePlaceholder();
+    const iconMap  = { image: "fa-image", pdf: "fa-file-pdf", code: "fa-code", text: "fa-file-lines" };
+    const labelMap = {
+        image: "Image — OCR extracted",
+        pdf:   "PDF — text extracted",
+        code:  "Code file — analyzed",
+        text:  "Text file — read"
+    };
+
+    selectedFiles.forEach(item => {
+        const cat  = getFileCategory(item.file.type, item.file.name);
+        const wrap = document.createElement("div");
+        wrap.className = "msg file-msg user";
+        wrap.innerHTML = `
+            <div class="file-msg-card">
+                <div class="file-msg-icon ${cat === "code" ? "text" : cat}">
+                    <i class="fa-solid ${iconMap[cat] || "fa-file"}"></i>
+                </div>
+                <div class="file-msg-info">
+                    <div class="file-msg-name">${item.file.name}</div>
+                    <div class="file-msg-sub">${labelMap[cat] || "Attached"}</div>
+                </div>
+            </div>`;
+        chatBox.appendChild(wrap);
+    });
+    scrollToBottom();
+}
+
+// ------------------------------------------
+// 10. ✨ ACTION ENGINE — Tag Parser
+//     ✅ BUG FIXED: Called only ONCE now (was called twice in old new version)
+//     Tags: [PDF] [PPT] [CHART] [PREVIEW]
+// ------------------------------------------
 function parseAndExecuteActions(rawText) {
-    let text = rawText;
+    let text      = rawText;
     let indicator = null;
 
-    // ── [PDF] ──────────────────────────────────────────────────
+    // [PDF]...[/PDF]
     const pdfMatch = text.match(/\[PDF\]([\s\S]*?)\[\/PDF\]/i);
     if (pdfMatch) {
         text = text.replace(pdfMatch[0], "").trim();
@@ -387,7 +386,7 @@ function parseAndExecuteActions(rawText) {
         indicator = `<i class="fa-solid fa-file-pdf"></i> PDF generated & downloaded`;
     }
 
-    // ── [PPT] ──────────────────────────────────────────────────
+    // [PPT]json[/PPT]
     const pptMatch = text.match(/\[PPT\]([\s\S]*?)\[\/PPT\]/i);
     if (pptMatch) {
         text = text.replace(pptMatch[0], "").trim();
@@ -395,14 +394,15 @@ function parseAndExecuteActions(rawText) {
         indicator = `<i class="fa-solid fa-file-powerpoint"></i> Presentation downloaded`;
     }
 
-    // ── [CHART] ────────────────────────────────────────────────
+    // [CHART]json[/CHART]
     const chartMatch = text.match(/\[CHART\]([\s\S]*?)\[\/CHART\]/i);
     if (chartMatch) {
         text = text.replace(chartMatch[0], "").trim();
         setTimeout(() => generateChart(chartMatch[1].trim()), 120);
+        // No indicator pill — chart renders inline in chat
     }
 
-    // ── [PREVIEW] ──────────────────────────────────────────────
+    // [PREVIEW]html[/PREVIEW]
     const previewMatch = text.match(/\[PREVIEW\]([\s\S]*?)\[\/PREVIEW\]/i);
     if (previewMatch) {
         text = text.replace(previewMatch[0], "").trim();
@@ -412,25 +412,25 @@ function parseAndExecuteActions(rawText) {
     }
 
     return {
-        cleanText: text || "✅ Done! Check above for your output.",
+        cleanText: text.trim() || "✅ Done! Check above for your output.",
         indicator
     };
 }
 
 // ------------------------------------------
-// 9. PDF Generator — jsPDF
+// 11. PDF Generator — Enhanced jsPDF
 // ------------------------------------------
 function generatePDF(content) {
     try {
         const { jsPDF } = window.jspdf;
         if (!jsPDF) { showToast("⚠️ jsPDF not loaded yet. Try again."); return; }
 
-        const doc = new jsPDF({ unit: "mm", format: "a4" });
-        const pageW = doc.internal.pageSize.getWidth();
+        const doc    = new jsPDF({ unit: "mm", format: "a4" });
+        const pageW  = doc.internal.pageSize.getWidth();
         const margin = 15;
-        const usableW = pageW - margin * 2;
+        const useW   = pageW - margin * 2;
 
-        // ── Header band ──
+        // Header band
         doc.setFillColor(6, 8, 14);
         doc.rect(0, 0, pageW, 24, "F");
         doc.setTextColor(0, 229, 255);
@@ -440,18 +440,16 @@ function generatePDF(content) {
         doc.setTextColor(120, 130, 145);
         doc.setFontSize(8.5);
         doc.setFont("helvetica", "normal");
-        doc.text("Generated by Shanu AI — Shiva Saini", pageW - margin, 15, { align: "right" });
+        doc.text(`Generated: ${new Date().toLocaleString()}`, pageW - margin, 15, { align: "right" });
 
-        // ── Body ──
+        // Body
         doc.setTextColor(25, 25, 35);
         doc.setFontSize(11);
-        doc.setFont("helvetica", "normal");
         let y = 33;
 
-        const lines = doc.splitTextToSize(content, usableW);
+        const lines = doc.splitTextToSize(content, useW);
         lines.forEach(line => {
             if (y > 282) { doc.addPage(); y = 18; }
-            // Simple heading detection (lines ending with ':' or ALL CAPS)
             const isHeading = line.trim().endsWith(":") || /^[A-Z\s]{6,}$/.test(line.trim());
             if (isHeading) {
                 doc.setFont("helvetica", "bold");
@@ -464,7 +462,7 @@ function generatePDF(content) {
             y += 6.5;
         });
 
-        // ── Footer ──
+        // Footer page numbers
         const total = doc.internal.getNumberOfPages();
         for (let i = 1; i <= total; i++) {
             doc.setPage(i);
@@ -482,7 +480,7 @@ function generatePDF(content) {
 }
 
 // ------------------------------------------
-// 10. PPT Generator — PptxGenJS
+// 12. PPT Generator — PptxGenJS
 // ------------------------------------------
 async function generatePPT(jsonStr) {
     try {
@@ -490,93 +488,38 @@ async function generatePPT(jsonStr) {
             showToast("⚠️ PptxGenJS not loaded yet. Try again."); return;
         }
 
-        // Strip markdown code fences if AI wraps JSON
         const clean = jsonStr.replace(/^```[a-z]*\n?/i, "").replace(/\n?```$/i, "").trim();
-        const data = JSON.parse(clean);
+        const data  = JSON.parse(clean);
+        const pptx  = new PptxGenJS();
+        pptx.layout = "LAYOUT_WIDE";
 
-        const pptx = new PptxGenJS();
-        pptx.layout  = "LAYOUT_WIDE";
+        const BG = "06080E", ACCENT = "00E5FF", WHITE = "F0F4FF", MUTED = "6B7280", INDIGO = "6366F1";
 
-        // Theme colors
-        const BG     = "06080E";
-        const ACCENT = "00E5FF";
-        const WHITE  = "F0F4FF";
-        const MUTED  = "6B7280";
-        const INDIGO = "6366F1";
-
-        // ── Title Slide ──────────────────────────────────────
+        // Title slide
         if (data.title) {
-            const tSlide = pptx.addSlide();
-            tSlide.background = { color: BG };
-
-            // Accent bar
-            tSlide.addShape(pptx.ShapeType.rect, {
-                x: 0, y: 0, w: "100%", h: 0.09,
-                fill: { color: ACCENT }
-            });
-            // Decorative side stripe
-            tSlide.addShape(pptx.ShapeType.rect, {
-                x: 0, y: 0.09, w: 0.06, h: "100%",
-                fill: { color: INDIGO }
-            });
-
-            tSlide.addText(data.title, {
-                x: 0.8, y: 1.4, w: 11, h: 1.6,
-                fontSize: 42, bold: true, color: WHITE, fontFace: "Calibri"
-            });
-            if (data.subtitle) {
-                tSlide.addText(data.subtitle, {
-                    x: 0.8, y: 3.2, w: 11, h: 0.8,
-                    fontSize: 18, color: MUTED
-                });
-            }
-            tSlide.addText("Shanu AI", {
-                x: 0.8, y: 6.6, w: 4, h: 0.4,
-                fontSize: 9, color: INDIGO, italic: true
-            });
+            const ts = pptx.addSlide();
+            ts.background = { color: BG };
+            ts.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: "100%", h: 0.09, fill: { color: ACCENT } });
+            ts.addShape(pptx.ShapeType.rect, { x: 0, y: 0.09, w: 0.06, h: "100%", fill: { color: INDIGO } });
+            ts.addText(data.title, { x: 0.8, y: 1.4, w: 11, h: 1.6, fontSize: 42, bold: true, color: WHITE, fontFace: "Calibri" });
+            if (data.subtitle) ts.addText(data.subtitle, { x: 0.8, y: 3.2, w: 11, h: 0.8, fontSize: 18, color: MUTED });
+            ts.addText("Shanu AI", { x: 0.8, y: 6.6, w: 4, h: 0.4, fontSize: 9, color: INDIGO, italic: true });
         }
 
-        // ── Content Slides ────────────────────────────────────
+        // Content slides
         (data.slides || []).forEach((slide, idx) => {
             const s = pptx.addSlide();
             s.background = { color: BG };
-
-            // Accent bar
-            s.addShape(pptx.ShapeType.rect, {
-                x: 0, y: 0, w: "100%", h: 0.07,
-                fill: { color: ACCENT }
-            });
-
-            // Slide number
-            s.addText(String(idx + 1), {
-                x: 11.8, y: 6.7, w: 0.6, h: 0.35,
-                fontSize: 9, color: MUTED, align: "right"
-            });
-
-            // Title
-            if (slide.title) {
-                s.addText(slide.title, {
-                    x: 0.5, y: 0.25, w: 12, h: 1,
-                    fontSize: 28, bold: true, color: ACCENT, fontFace: "Calibri"
-                });
-            }
-
-            // Bullets (preferred) or plain content
+            s.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: "100%", h: 0.07, fill: { color: ACCENT } });
+            s.addText(String(idx + 1), { x: 11.8, y: 6.7, w: 0.6, h: 0.35, fontSize: 9, color: MUTED, align: "right" });
+            if (slide.title) s.addText(slide.title, { x: 0.5, y: 0.25, w: 12, h: 1, fontSize: 28, bold: true, color: ACCENT, fontFace: "Calibri" });
             if (Array.isArray(slide.bullets) && slide.bullets.length > 0) {
-                const items = slide.bullets.map(b => ({
+                s.addText(slide.bullets.map(b => ({
                     text: String(b),
                     options: { bullet: { type: "bullet", indent: 12 }, color: WHITE, fontSize: 15 }
-                }));
-                s.addText(items, {
-                    x: 0.5, y: 1.45, w: 12, h: 5.1,
-                    lineSpacingMultiple: 1.55
-                });
+                })), { x: 0.5, y: 1.45, w: 12, h: 5.1, lineSpacingMultiple: 1.55 });
             } else if (slide.content) {
-                s.addText(String(slide.content), {
-                    x: 0.5, y: 1.45, w: 12, h: 5.1,
-                    fontSize: 15, color: WHITE,
-                    lineSpacingMultiple: 1.55, wrap: true
-                });
+                s.addText(String(slide.content), { x: 0.5, y: 1.45, w: 12, h: 5.1, fontSize: 15, color: WHITE, lineSpacingMultiple: 1.55, wrap: true });
             }
         });
 
@@ -584,24 +527,21 @@ async function generatePPT(jsonStr) {
         showToast("📊 Presentation downloaded!");
     } catch (e) {
         console.error("PPT Error:", e);
-        showToast("⚠️ PPT failed — AI may have returned invalid JSON. Try: 'retry PPT'");
+        showToast("⚠️ PPT failed. Try saying 'retry PPT'.");
     }
 }
 
 // ------------------------------------------
-// 11. Chart Generator — Chart.js
+// 13. Chart Generator — Chart.js
 // ------------------------------------------
 function generateChart(jsonStr) {
     try {
-        if (typeof Chart === "undefined") {
-            showToast("⚠️ Chart.js not loaded yet. Try again."); return;
-        }
+        if (typeof Chart === "undefined") { showToast("⚠️ Chart.js not loaded yet."); return; }
 
         const clean = jsonStr.replace(/^```[a-z]*\n?/i, "").replace(/\n?```$/i, "").trim();
-        const data = JSON.parse(clean);
+        const data  = JSON.parse(clean);
 
-        // Build chart wrapper bubble
-        const wrap = document.createElement("div");
+        const wrap  = document.createElement("div");
         wrap.className = "chart-wrap";
         const uid = `chart_${Date.now()}`;
         wrap.innerHTML = `
@@ -613,24 +553,24 @@ function generateChart(jsonStr) {
         chatBox.appendChild(wrap);
         scrollToBottom();
 
-        const PALETTE = ["#00E5FF","#6366f1","#10B981","#F59E0B","#F43F5E","#8B5CF6"];
+        const PALETTE = ["#00E5FF", "#6366f1", "#10B981", "#F59E0B", "#F43F5E", "#8B5CF6"];
 
         new Chart(document.getElementById(uid), {
             type: data.type || "bar",
             data: {
                 labels: data.labels || [],
                 datasets: (data.datasets || []).map((ds, i) => {
-                    const color = ds.color || PALETTE[i % PALETTE.length];
-                    const isLine = (data.type === "line" || data.type === "radar");
+                    const color  = ds.color || PALETTE[i % PALETTE.length];
+                    const isLine = ["line", "radar"].includes(data.type);
                     return {
                         label: ds.label || `Series ${i + 1}`,
-                        data: ds.data || [],
+                        data:  ds.data  || [],
                         backgroundColor: isLine ? color + "30" : color + "CC",
-                        borderColor: color,
-                        borderWidth: 2,
-                        borderRadius: data.type === "bar" ? 6 : 0,
-                        tension: 0.4,
-                        fill: isLine,
+                        borderColor:     color,
+                        borderWidth:     2,
+                        borderRadius:    data.type === "bar" ? 6 : 0,
+                        tension:         0.4,
+                        fill:            isLine,
                         pointBackgroundColor: color,
                         pointRadius: 4
                     };
@@ -638,62 +578,50 @@ function generateChart(jsonStr) {
             },
             options: {
                 responsive: true,
-                plugins: {
-                    legend: {
-                        labels: { color: "#F0F4FF", font: { size: 12 }, padding: 16 }
-                    }
-                },
-                scales: ["pie","doughnut"].includes(data.type) ? {} : {
-                    x: {
-                        ticks: { color: "#9CA3AF", font: { size: 11 } },
-                        grid: { color: "rgba(255,255,255,0.04)" }
-                    },
-                    y: {
-                        ticks: { color: "#9CA3AF", font: { size: 11 } },
-                        grid: { color: "rgba(255,255,255,0.06)" }
-                    }
+                plugins: { legend: { labels: { color: "#F0F4FF", font: { size: 12 }, padding: 16 } } },
+                scales: ["pie", "doughnut"].includes(data.type) ? {} : {
+                    x: { ticks: { color: "#9CA3AF", font: { size: 11 } }, grid: { color: "rgba(255,255,255,0.04)" } },
+                    y: { ticks: { color: "#9CA3AF", font: { size: 11 } }, grid: { color: "rgba(255,255,255,0.06)" } }
                 }
             }
         });
     } catch (e) {
         console.error("Chart Error:", e);
-        showToast("⚠️ Chart data invalid. Try: 'retry chart'");
+        showToast("⚠️ Chart data invalid. Try 'retry chart'.");
     }
 }
 
 // ------------------------------------------
-// 12. Live Preview Modal
+// 14. Live Preview Modal
 // ------------------------------------------
-function showLivePreview(htmlContent) {
-    lastPreviewHTML = htmlContent;
+function showLivePreview(html) {
+    lastPreviewHTML = html;
     const doc = previewFrame.contentDocument || previewFrame.contentWindow.document;
-    doc.open();
-    doc.write(htmlContent);
-    doc.close();
+    doc.open(); doc.write(html); doc.close();
     previewModal.classList.add("show");
 }
 
-closePreviewBtn?.addEventListener("click", () => previewModal.classList.remove("show"));
+closePreviewBtn?.addEventListener("click",      () => previewModal.classList.remove("show"));
 previewModalBackdrop?.addEventListener("click", () => previewModal.classList.remove("show"));
 
 previewCopyBtn?.addEventListener("click", () => {
     navigator.clipboard.writeText(lastPreviewHTML)
-        .then(() => showToast("✅ HTML copied to clipboard!"))
-        .catch(() => showToast("⚠️ Copy failed — try manually."));
+        .then(() => showToast("✅ HTML copied!"))
+        .catch(() => showToast("⚠️ Copy failed."));
 });
 
 previewDownloadBtn?.addEventListener("click", () => {
-    const blob = new Blob([lastPreviewHTML], { type: "text/html" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = "shanu-ai-preview.html";
+    const a = Object.assign(document.createElement("a"), {
+        href: URL.createObjectURL(new Blob([lastPreviewHTML], { type: "text/html" })),
+        download: "shanu-ai-preview.html"
+    });
     a.click();
     URL.revokeObjectURL(a.href);
-    showToast("📥 HTML file downloaded!");
+    showToast("📥 HTML downloaded!");
 });
 
 // ------------------------------------------
-// 13. File Type Helpers
+// 15. File Type Helpers
 // ------------------------------------------
 function getFileExtension(filename) {
     return (filename || "").split(".").pop().toLowerCase().trim();
@@ -701,28 +629,27 @@ function getFileExtension(filename) {
 
 function getFileCategory(mimeType, filename = "") {
     if (mimeType && mimeType.startsWith("image/")) return "image";
-    if (mimeType === "application/pdf") return "pdf";
-    const ext = getFileExtension(filename);
-    if (CODE_EXTS.has(ext)) return "code";
+    if (mimeType === "application/pdf")             return "pdf";
+    if (CODE_EXTS.has(getFileExtension(filename)))  return "code";
     return "text";
 }
 
-const CATEGORY_ICON = { image: "fa-file-image", pdf: "fa-file-pdf", code: "fa-code", text: "fa-file-lines" };
-const CATEGORY_STATUS = {
+const CHIP_ICON  = { image: "fa-file-image", pdf: "fa-file-pdf", code: "fa-code", text: "fa-file-lines" };
+const CHIP_CLASS = { image: "image", pdf: "pdf", code: "code", text: "txt" };
+const CHIP_LABEL = {
     image: "Image · OCR will extract text",
     pdf:   "PDF · text will be extracted",
     code:  "Code file · full content read",
     text:  "Text file · content read"
 };
-const CHIP_ICON_CLASS = { image: "image", pdf: "pdf", code: "code", text: "txt" };
 
 // ------------------------------------------
-// 14. Multi-File UI — Chip Renderer
+// 16. Multi-File Chip UI
 // ------------------------------------------
 function renderFileChips() {
     multiFileList.innerHTML = "";
 
-    if (selectedFiles.length === 0) {
+    if (!selectedFiles.length) {
         filePreviewBar.classList.remove("show");
         return;
     }
@@ -730,17 +657,16 @@ function renderFileChips() {
     filePreviewBar.classList.add("show");
 
     selectedFiles.forEach((item, idx) => {
-        const cat = getFileCategory(item.file.type, item.file.name);
+        const cat  = getFileCategory(item.file.type, item.file.name);
         const chip = document.createElement("div");
         chip.className = "file-chip";
-        chip.dataset.idx = idx;
         chip.innerHTML = `
-            <div class="file-chip-icon ${CHIP_ICON_CLASS[cat] || "txt"}">
-                <i class="fa-solid ${CATEGORY_ICON[cat] || "fa-file"}"></i>
+            <div class="file-chip-icon ${CHIP_CLASS[cat] || "txt"}">
+                <i class="fa-solid ${CHIP_ICON[cat] || "fa-file"}"></i>
             </div>
             <div class="file-chip-info">
                 <span class="file-chip-name">${item.file.name}</span>
-                <span class="file-chip-status" id="chipSt_${idx}">${item.status || CATEGORY_STATUS[cat]}</span>
+                <span class="file-chip-status" id="chipSt_${idx}">${CHIP_LABEL[cat]}</span>
             </div>
             <button class="file-chip-remove" data-idx="${idx}" title="Remove">
                 <i class="fa-solid fa-xmark"></i>
@@ -748,28 +674,24 @@ function renderFileChips() {
         multiFileList.appendChild(chip);
     });
 
-    // Remove file on × click
     multiFileList.querySelectorAll(".file-chip-remove").forEach(btn => {
-        btn.addEventListener("click", (e) => {
+        btn.addEventListener("click", e => {
             e.stopPropagation();
-            const i = parseInt(btn.dataset.idx);
-            selectedFiles.splice(i, 1);
+            selectedFiles.splice(parseInt(btn.dataset.idx), 1);
             renderFileChips();
-            if (selectedFiles.length === 0) inputBox.placeholder = "Message Shanu AI...";
+            if (!selectedFiles.length) inputBox.placeholder = "Message Shanu AI...";
         });
     });
 }
 
-function setChipStatus(idx, msg, cssClass = "") {
+function setChipStatus(idx, msg, cls = "") {
     const el = document.getElementById(`chipSt_${idx}`);
-    if (!el) return;
-    el.textContent = msg;
-    el.className = `file-chip-status ${cssClass}`;
+    if (el) { el.textContent = msg; el.className = `file-chip-status ${cls}`; }
 }
 
-function updateOcrProgress(percent) {
+function updateProgress(pct) {
     ocrProgressBar.classList.add("show");
-    ocrProgressFill.style.width = `${Math.min(percent, 100)}%`;
+    ocrProgressFill.style.width = `${Math.min(pct, 100)}%`;
 }
 
 function clearAllFiles() {
@@ -781,30 +703,18 @@ function clearAllFiles() {
 }
 
 // ------------------------------------------
-// 15. File Input Handler
+// 17. File Input Handler
 // ------------------------------------------
 attachBtn.addEventListener("click", () => fileInput.click());
 
-fileInput.addEventListener("change", (e) => {
-    const newFiles = Array.from(e.target.files || []);
-    if (!newFiles.length) return;
+fileInput.addEventListener("change", e => {
+    const files    = Array.from(e.target.files || []);
+    const big      = files.filter(f => f.size > 10 * 1024 * 1024);
+    if (big.length) { showToast(`⚠️ Too large (max 10MB): ${big.map(f => f.name).join(", ")}`); fileInput.value = ""; return; }
 
-    const oversized = newFiles.filter(f => f.size > 10 * 1024 * 1024);
-    if (oversized.length) {
-        showToast(`⚠️ Too large (max 10MB): ${oversized.map(f => f.name).join(", ")}`);
-        fileInput.value = "";
-        return;
-    }
-
-    // Deduplicate by filename
     const existing = new Set(selectedFiles.map(i => i.file.name));
-    const added = [];
-    newFiles.forEach(f => {
-        if (!existing.has(f.name)) {
-            selectedFiles.push({ file: f, status: "" });
-            added.push(f.name);
-        }
-    });
+    const added    = files.filter(f => !existing.has(f.name));
+    added.forEach(f => selectedFiles.push({ file: f, status: "" }));
 
     if (added.length) {
         renderFileChips();
@@ -814,16 +724,15 @@ fileInput.addEventListener("change", (e) => {
     } else {
         showToast("ℹ️ Files already attached.");
     }
-
     fileInput.value = "";
 });
 
 // ------------------------------------------
-// 16. Core Send Router
+// 18. Send Router
 // ------------------------------------------
 async function handleSendAction() {
     if (sending) return;
-    if (selectedFiles.length > 0) { await processAndSendFiles(); return; }
+    if (selectedFiles.length) { await processAndSendFiles(); return; }
     const text = inputBox.value.trim();
     if (!text) return;
     await sendTextMessage(text);
@@ -831,61 +740,46 @@ async function handleSendAction() {
 
 sendBtn.addEventListener("click", handleSendAction);
 
-// ------------------------------------------
-// 17. Plain Text Send
-// ------------------------------------------
 async function sendTextMessage(text) {
     addMessage(text, "user");
-    inputBox.value = "";
-    resizeInput();
+    inputBox.value = ""; resizeInput();
     chatContext.push({ role: "user", content: text });
     await saveMessageToDB("user", text);
     await callAPI();
 }
 
 // ------------------------------------------
-// 18. API Call (uses chatContext internally)
+// 19. API Call
 // ------------------------------------------
 async function callAPI() {
     lockUI();
     const typingEl = showTyping();
-
     try {
-        const res = await fetch("/api/ask", {
-            method: "POST",
+        const res  = await fetch("/api/ask", {
+            method:  "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                messages: chatContext.slice(-12),
-                mood: currentMood
-            })
+            body:    JSON.stringify({ messages: chatContext.slice(-12), mood: currentMood })
         });
-
         const data = await res.json();
         typingEl.remove();
-
         const reply = data.reply || "Hmm... kuch samajh nahi aaya 🤔";
         addMessage(reply, "bot", true);
         chatContext.push({ role: "assistant", content: reply });
         await saveMessageToDB("assistant", reply);
-
     } catch (err) {
         console.error("API Error:", err);
         typingEl.remove();
         addMessage("❌ Network error! Please check your connection.", "bot", false);
     }
-
     unlockUI();
 }
 
 // ------------------------------------------
-// 19. ✨ Multi-File Processing Pipeline
+// 20. Multi-File Processing Pipeline
 // ------------------------------------------
 async function processAndSendFiles() {
-    const userQuestion = inputBox.value.trim();
-    inputBox.value = "";
-    resizeInput();
-
-    // Show file bubbles in chat
+    const question = inputBox.value.trim();
+    inputBox.value = ""; resizeInput();
     addFileBubbles();
     lockUI();
 
@@ -898,20 +792,13 @@ async function processAndSendFiles() {
         const ext = getFileExtension(file.name);
 
         setChipStatus(i, "Processing...", "processing");
-        updateOcrProgress(Math.round(((i) / total) * 85));
+        updateProgress(Math.round((i / total) * 85));
 
         let text = "";
         try {
-            if (cat === "image") {
-                setChipStatus(i, "Running OCR...", "processing");
-                text = await extractTextFromImage(file, i, total);
-            } else if (cat === "pdf") {
-                setChipStatus(i, "Extracting PDF...", "processing");
-                text = await extractTextFromPDF(file);
-            } else {
-                setChipStatus(i, "Reading file...", "processing");
-                text = await readTextFile(file);
-            }
+            if      (cat === "image") { setChipStatus(i, "Running OCR...",   "processing"); text = await extractTextFromImage(file, i, total); }
+            else if (cat === "pdf")   { setChipStatus(i, "Extracting PDF...", "processing"); text = await extractTextFromPDF(file); }
+            else                      { setChipStatus(i, "Reading file...",   "processing"); text = await readTextFile(file); }
             setChipStatus(i, "✅ Done", "done");
         } catch (err) {
             console.error(`Error on ${file.name}:`, err);
@@ -919,7 +806,6 @@ async function processAndSendFiles() {
             text = "[File could not be read]";
         }
 
-        // Wrap code in fenced block for cleaner AI analysis
         const content = (cat === "code")
             ? `\`\`\`${ext}\n${text.trim().slice(0, 5000)}\n\`\`\``
             : text.trim().slice(0, 5000);
@@ -927,36 +813,77 @@ async function processAndSendFiles() {
         combined += `\n\n${"=".repeat(50)}\nFILE ${i + 1} of ${total}: ${file.name}\n${"=".repeat(50)}\n${content}`;
     }
 
-    updateOcrProgress(100);
+    updateProgress(100);
 
-    // Build final context message
     let contextMsg = `[📎 ${total} file${total > 1 ? "s" : ""} uploaded]${combined}`;
-    if (userQuestion) contextMsg += `\n\n${"─".repeat(40)}\nUser's Question: ${userQuestion}`;
+    if (question) contextMsg += `\n\n${"─".repeat(40)}\nUser's Question: ${question}`;
 
-    // Simple summary for DB (avoids storing huge text)
-    const dbSummary = `[Files: ${selectedFiles.map(i => i.file.name).join(", ")}]${userQuestion ? " — " + userQuestion : ""}`;
+    const dbSummary = `[Files: ${selectedFiles.map(i => i.file.name).join(", ")}]${question ? " — " + question : ""}`;
 
     chatContext.push({ role: "user", content: contextMsg });
     await saveMessageToDB("user", dbSummary);
 
     clearAllFiles();
-
-    // Now call API (already locked, callAPI will lock again — unlock first)
     unlockUI();
     await callAPI();
 }
 
 // ------------------------------------------
-// 20. OCR + Extraction Functions
+// 21. ✅ RESTORED: preprocessImage (from old version)
+//     File → ObjectURL → Canvas → Grayscale+Contrast boost → Tesseract
+//     Much better OCR accuracy than passing raw file directly
 // ------------------------------------------
-async function extractTextFromImage(file, fileIdx, totalFiles) {
+async function preprocessImage(file) {
     return new Promise((resolve, reject) => {
-        Tesseract.recognize(file, "eng+hin", {
-            logger: (m) => {
+        const objectUrl = URL.createObjectURL(file);
+        const img       = new Image();
+
+        img.onload = () => {
+            const MAX = 2000;
+            let w = img.naturalWidth, h = img.naturalHeight;
+            if (w > MAX || h > MAX) {
+                const scale = MAX / Math.max(w, h);
+                w = Math.floor(w * scale);
+                h = Math.floor(h * scale);
+            }
+
+            const canvas = document.createElement("canvas");
+            canvas.width = w; canvas.height = h;
+            const ctx = canvas.getContext("2d");
+            ctx.drawImage(img, 0, 0, w, h);
+
+            // Grayscale + contrast boost (factor 1.5) for better OCR
+            const imgData = ctx.getImageData(0, 0, w, h);
+            const d = imgData.data;
+            const C = 1.5;
+            for (let i = 0; i < d.length; i += 4) {
+                const gray    = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+                const boosted = Math.max(0, Math.min(255, ((gray - 128) * C) + 128));
+                d[i] = d[i + 1] = d[i + 2] = boosted;
+            }
+            ctx.putImageData(imgData, 0, 0);
+
+            URL.revokeObjectURL(objectUrl);
+            resolve(canvas);
+        };
+
+        img.onerror = () => { URL.revokeObjectURL(objectUrl); reject(new Error("Image load failed")); };
+        img.src = objectUrl;
+    });
+}
+
+async function extractTextFromImage(file, fileIdx, totalFiles) {
+    setChipStatus(fileIdx, "Preprocessing...", "processing");
+    const canvas = await preprocessImage(file);   // ✅ Canvas, not raw file
+    updateProgress(Math.round(((fileIdx) / totalFiles) * 20) + 10);
+
+    return new Promise((resolve, reject) => {
+        Tesseract.recognize(canvas, "eng+hin", {
+            logger: m => {
                 if (m.status === "recognizing text") {
                     const base = (fileIdx / totalFiles) * 85;
-                    const inc  = (m.progress / totalFiles) * 85;
-                    updateOcrProgress(Math.round(base + inc));
+                    const inc  = (m.progress / totalFiles) * 75;
+                    updateProgress(Math.round(base + inc));
                     setChipStatus(fileIdx, `OCR ${Math.round(m.progress * 100)}%`, "processing");
                 }
             }
@@ -969,17 +896,15 @@ async function extractTextFromImage(file, fileIdx, totalFiles) {
 async function extractTextFromPDF(file) {
     const arrayBuffer = await file.arrayBuffer();
     const typedArray  = new Uint8Array(arrayBuffer);
-
-    const pdfjsLib = window["pdfjs-dist/build/pdf"];
+    const pdfjsLib    = window["pdfjs-dist/build/pdf"];
     if (!pdfjsLib) throw new Error("PDF.js not loaded");
     pdfjsLib.GlobalWorkerOptions.workerSrc =
         "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 
     const pdf = await pdfjsLib.getDocument({ data: typedArray }).promise;
     let fullText = "";
-
     for (let p = 1; p <= pdf.numPages; p++) {
-        const page = await pdf.getPage(p);
+        const page    = await pdf.getPage(p);
         const content = await page.getTextContent();
         fullText += `\n[Page ${p}]\n` + content.items.map(i => i.str).join(" ");
     }
@@ -988,59 +913,47 @@ async function extractTextFromPDF(file) {
 
 async function readTextFile(file) {
     return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload  = (e) => resolve(e.target.result || "");
-        reader.onerror = reject;
+        const reader    = new FileReader();
+        reader.onload   = e => resolve(e.target.result || "");
+        reader.onerror  = reject;
         reader.readAsText(file, "UTF-8");
     });
 }
 
 // ------------------------------------------
-// 21. Microphone — Web Speech API
+// 22. Microphone — Web Speech API
 // ------------------------------------------
 function initSpeechRecognition() {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) { showToast("⚠️ Voice not supported. Use Chrome/Edge."); return false; }
 
     recognition = new SR();
-    recognition.lang            = "hi-IN";
-    recognition.interimResults  = true;
-    recognition.continuous      = false;
-    recognition.maxAlternatives = 1;
+    recognition.lang = "hi-IN"; recognition.interimResults = true; recognition.continuous = false;
 
     recognition.onstart = () => {
         isRecording = true;
-        micBtn.classList.add("recording");
-        micIcon.className = "fa-solid fa-stop";
+        micBtn.classList.add("recording"); micIcon.className = "fa-solid fa-stop";
         inputBox.placeholder = "Listening... 🎙️";
         showToast("🎙️ Listening...");
     };
 
-    recognition.onresult = (e) => {
+    recognition.onresult = e => {
         inputBox.value = Array.from(e.results).map(r => r[0].transcript).join("");
         resizeInput();
     };
 
     recognition.onend = () => {
         isRecording = false;
-        micBtn.classList.remove("recording");
-        micIcon.className = "fa-solid fa-microphone";
-        inputBox.placeholder = selectedFiles.length > 0
-            ? "Ask a question about these files (optional)..."
-            : "Message Shanu AI...";
+        micBtn.classList.remove("recording"); micIcon.className = "fa-solid fa-microphone";
+        inputBox.placeholder = selectedFiles.length ? "Ask a question about these files (optional)..." : "Message Shanu AI...";
         const t = inputBox.value.trim();
         if (t) setTimeout(() => handleSendAction(), 350);
     };
 
-    recognition.onerror = (e) => {
+    recognition.onerror = e => {
         isRecording = false;
-        micBtn.classList.remove("recording");
-        micIcon.className = "fa-solid fa-microphone";
-        const msgs = {
-            "no-speech":   "No speech detected.",
-            "not-allowed": "Mic permission denied.",
-            "network":     "Network error."
-        };
+        micBtn.classList.remove("recording"); micIcon.className = "fa-solid fa-microphone";
+        const msgs = { "no-speech": "No speech detected.", "not-allowed": "Mic permission denied.", "network": "Network error." };
         showToast(`⚠️ ${msgs[e.error] || "Voice error."}`);
     };
 
@@ -1055,7 +968,7 @@ micBtn.addEventListener("click", () => {
 });
 
 // ------------------------------------------
-// 22. Clear & New Chat
+// 23. Clear & New Chat
 // ------------------------------------------
 clearBtn.addEventListener("click", async () => {
     if (!confirm("Bhai, saari chat delete kar doon? 🗑️")) return;
@@ -1073,15 +986,21 @@ document.getElementById("settingsBtn")?.addEventListener("click", () => {
 });
 
 // ------------------------------------------
-// 23. Init — Load history from Firebase
+// 24. ✅ RESTORED: Auth-safe initialization (from old version)
+//     initAuth() → waitForAuth() → loadHistoryFromDB()
+//     Fixes the race condition where history loaded before Firebase
+//     anonymous auth resolved, causing empty/wrong history
 // ------------------------------------------
 async function initChat() {
     try {
-        const history = await loadHistoryFromDB(20);
+        await initAuth();      // Trigger anonymous sign-in
+        await waitForAuth();   // Block until auth state settles
+        const history = await loadHistoryFromDB(30);
+
         if (history.length > 0) {
             if (emptyPlaceholder) emptyPlaceholder.style.display = "none";
             history.forEach(m => {
-                // parseActions = false → don't re-trigger old PDF/PPT/Chart actions
+                // parseActions = false → don't re-trigger PDF/PPT/Chart on load
                 addMessage(m.content, m.role === "user" ? "user" : "bot", false);
                 chatContext.push({ role: m.role, content: m.content });
             });
