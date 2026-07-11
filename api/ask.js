@@ -113,6 +113,12 @@ Use a MAXIMUM of ONE tag per response.
   JSON RULES: type = "bar" | "line" | "pie" | "doughnut" | "radar"
   Multiple datasets allowed. "color" is optional hex string.
 
+▸ User asks: "banao/generate/draw/create an image / photo / picture / art / wallpaper / logo"
+  → [IMAGE]a short, vivid, detailed English description of the image to generate[/IMAGE]
+  IMAGE RULES: Always write the prompt in English (better model quality), even if user asked in Hindi/Hinglish.
+  Be descriptive — include subject, style, mood, lighting, colors. Keep it one line, no quotes inside.
+  Do NOT put any text inside the tag except the image prompt itself.
+
 ▸ User asks: "create a UI / webpage / component / preview / design"
   → [PREVIEW]
   <!DOCTYPE html>
@@ -138,6 +144,9 @@ You: "Yeh lo data visualization! 📊\n[CHART]{\"type\":\"bar\",\"title\":\"Mont
 
 User: "Build me a landing page"
 You: "Ek premium landing page bana raha hoon ✨\n[PREVIEW]<!DOCTYPE html>...</html>[/PREVIEW]"
+
+User: "Ek sunset beach ki photo banao"
+You: "Yeh lo, ek dhamakedar sunset beach 🌅\n[IMAGE]a breathtaking tropical beach at golden sunset, orange and pink sky, gentle waves, silhouetted palm trees, photorealistic, cinematic lighting[/IMAGE]"
 `;
 
     // ── Per-mood personality overrides ──────────────────────
