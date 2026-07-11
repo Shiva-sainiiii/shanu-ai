@@ -8,9 +8,10 @@
 [![CSS3](https://img.shields.io/badge/CSS3-1572B6?style=flat-square&logo=css3&logoColor=white)](https://developer.mozilla.org/en-US/docs/Web/CSS)
 [![JavaScript](https://img.shields.io/badge/JavaScript-F7DF1E?style=flat-square&logo=javascript&logoColor=black)](https://developer.mozilla.org/en-US/docs/Web/JavaScript)
 [![Firebase](https://img.shields.io/badge/Firebase-FFCA28?style=flat-square&logo=firebase&logoColor=black)](https://firebase.google.com/)
+[![Cloudinary](https://img.shields.io/badge/Cloudinary-3448C5?style=flat-square&logo=cloudinary&logoColor=white)](https://cloudinary.com/)
 [![Vercel](https://img.shields.io/badge/Vercel-000000?style=flat-square&logo=vercel&logoColor=white)](https://vercel.com/)
 
-**A premium, context-aware AI chatbot with Glassmorphism UI, mood-based personalities, and persistent chat history.**
+**A premium, context-aware AI chatbot with Glassmorphism UI, mood-based personalities, AI image generation, and persistent chat history.**
 
 Developed with ❤️ by **[Shiva Saini](https://github.com/shiva-sainiiii)**
 
@@ -38,6 +39,8 @@ Developed with ❤️ by **[Shiva Saini](https://github.com/shiva-sainiiii)**
 
 **Shanu AI** is a next-generation, mood-aware conversational chatbot that dynamically adapts its personality based on user-selected moods. Built with a sleek **Glassmorphism UI** and powered by **Firebase Firestore**, all your conversations are securely stored and persist across sessions — so you never lose a chat.
 
+Beyond conversation, Shanu AI can generate images from text, export PDFs and PPTs, visualize data as charts, and spin up live HTML previews — all triggered by natural language, no buttons or menus needed.
+
 Whether you want a witty roast partner, a sarcastic companion, or a supportive friend, Shanu AI has a personality for every vibe.
 
 ---
@@ -47,9 +50,12 @@ Whether you want a witty roast partner, a sarcastic companion, or a supportive f
 | Feature | Description |
 |---|---|
 | 🎭 **Mood Selector** | 8+ unique moods (Girlfriend, Boyfriend, Roast, Sarcastic, and more) that reshape the AI's entire personality |
+| 🎨 **Text-to-Image Generation** | Just ask — "banao ek sunset ki photo" — and Shanu generates a full AI image inline, powered by Pollinations.ai (free, no API key) |
+| ☁️ **Cloudinary Media Hosting** | User-uploaded images and AI-generated images are permanently hosted on Cloudinary — nothing expires or breaks |
 | 💎 **Glassmorphism UI** | Modern frosted-glass aesthetic with fluid blob animations and a polished dark theme |
-| 💾 **Persistent Memory** | Firebase Firestore integration ensures chat history survives page refreshes and device switches |
+| 💾 **Persistent Memory (Firebase + LocalStorage)** | Firestore stores chat history in the cloud, with a localStorage write-through cache for instant loads and offline-safe fallback |
 | 🧠 **Contextual Intelligence** | Maintains full conversation context so responses feel natural and coherent |
+| 📄 **Smart Output Engine** | One tag system powers PDF export, PPT generation, Chart.js visualizations, and live HTML previews — all from natural language |
 | 📱 **Responsive Design** | Seamlessly adapts to mobile and desktop screen sizes |
 | ⚡ **Pro Sidebar** | Quick navigation panel with recent mood history tracking |
 
@@ -60,8 +66,10 @@ Whether you want a witty roast partner, a sarcastic companion, or a supportive f
 | Layer | Technology |
 |---|---|
 | **Frontend** | HTML5, CSS3 (Glassmorphism), JavaScript ES6+ Modules |
-| **Database** | Firebase Firestore (Real-time NoSQL) |
+| **Database** | Firebase Firestore (Real-time NoSQL) + LocalStorage (instant-load cache) |
 | **AI Engine** | OpenRouter API — Nvidia Nemotron / Open-source LLMs |
+| **Image Generation** | Pollinations.ai (free text-to-image API, no key required) |
+| **Media Hosting** | Cloudinary (permanent hosting for uploaded & AI-generated images) |
 | **Deployment** | Vercel (Serverless Functions) |
 | **Icons** | Font Awesome 6.4.0 |
 | **Fonts** | Plus Jakarta Sans (Google Fonts) |
@@ -75,11 +83,12 @@ shanu-ai/
 │
 ├── index.html          # Main UI layout and structure
 ├── style.css           # Glassmorphism styling & animations
-├── chat.js             # Core UI logic & message handling
-├── firebase.js         # Firebase connection & Firestore helpers
+├── chat.js             # Core UI logic, message handling & Action Engine (PDF/PPT/Chart/Image/Preview)
+├── firebase.js         # Firebase connection, Firestore helpers & LocalStorage backup layer
 │
 └── api/
-    └── ask.js          # Serverless backend — OpenRouter API handler (Vercel)
+    ├── ask.js          # Serverless backend — OpenRouter API handler (Vercel)
+    └── upload.js       # Serverless backend — Cloudinary upload handler (Vercel)
 ```
 
 ---
@@ -119,18 +128,25 @@ const firebaseConfig = {
 };
 ```
 
-### 3. Deploy to Vercel
+### 3. Cloudinary Setup
+
+1. Go to [Cloudinary Console](https://console.cloudinary.com/) and create a free account.
+2. Copy your **Cloud Name** from the dashboard.
+3. Navigate to **Settings → Upload → Upload presets → Add upload preset**.
+4. Set **Signing Mode** to **Unsigned**, save, and copy the preset name.
+
+### 4. Deploy to Vercel
 
 1. Push the project to your GitHub repository.
 2. Import the repo in your [Vercel Dashboard](https://vercel.com/dashboard).
-3. Add the required environment variable (see below).
+3. Add the required environment variables (see below).
 4. Click **Deploy**.
 
 ---
 
 ## 🔑 Environment Variables
 
-Set the following environment variable in your Vercel project dashboard under **Settings → Environment Variables**:
+Set the following environment variables in your Vercel project dashboard under **Settings → Environment Variables**:
 
 | Variable | Description |
 |---|---|
@@ -138,7 +154,7 @@ Set the following environment variable in your Vercel project dashboard under **
 | `CLOUDINARY_CLOUD_NAME` | Your cloud name from [Cloudinary Console](https://console.cloudinary.com/) |
 | `CLOUDINARY_UPLOAD_PRESET` | An **unsigned** upload preset (Settings → Upload → Add upload preset → Signing Mode: Unsigned) |
 
-> ⚠️ **Never commit your API key to a public repository.**
+> ⚠️ **Never commit your API keys to a public repository.**
 
 ---
 
@@ -153,6 +169,8 @@ Shanu AI uses a composite Firestore query that requires a manual index to be cre
 5. Click **Create Index** and wait ~2 minutes for it to build.
 
 > ✅ This is a one-time setup. Once created, the index persists permanently.
+
+> 💡 **Note:** Even before the index is created, chat history won't be lost — Shanu AI writes every message to `localStorage` as a backup layer, so conversations render instantly and survive even if Firestore is temporarily unreachable.
 
 ---
 
