@@ -135,6 +135,8 @@ Set the following environment variable in your Vercel project dashboard under **
 | Variable | Description |
 |---|---|
 | `OPENROUTER_API_KEY` | Your API key from [OpenRouter](https://openrouter.ai/) |
+| `CLOUDINARY_CLOUD_NAME` | Your cloud name from [Cloudinary Console](https://console.cloudinary.com/) |
+| `CLOUDINARY_UPLOAD_PRESET` | An **unsigned** upload preset (Settings → Upload → Add upload preset → Signing Mode: Unsigned) |
 
 > ⚠️ **Never commit your API key to a public repository.**
 

@@ -19,7 +19,7 @@
 //   ✅ Wrong hljs theme (atom-one-dark → github-dark, matches CSS)
 // ==========================================
 
-import { saveMessageToDB, loadHistoryFromDB, clearSessionDB, initAuth, waitForAuth } from './firebase.js';
+import { saveMessageToDB, loadHistoryFromDB, clearSessionDB, initAuth, waitForAuth, loadLocalHistorySync } from './firebase.js';
 
 // ------------------------------------------
 // 1. DOM References
@@ -354,16 +354,41 @@ function addFileBubbles() {
         const cat  = getFileCategory(item.file.type, item.file.name);
         const wrap = document.createElement("div");
         wrap.className = "msg file-msg user";
-        wrap.innerHTML = `
-            <div class="file-msg-card">
-                <div class="file-msg-icon ${cat === "code" ? "text" : cat}">
-                    <i class="fa-solid ${iconMap[cat] || "fa-file"}"></i>
-                </div>
-                <div class="file-msg-info">
-                    <div class="file-msg-name">${item.file.name}</div>
-                    <div class="file-msg-sub">${labelMap[cat] || "Attached"}</div>
-                </div>
-            </div>`;
+
+        if (cat === "image") {
+            // Show the actual image thumbnail (local blob — instant, no wait)
+            const blobUrl = URL.createObjectURL(item.file);
+            wrap.innerHTML = `
+                <div class="file-msg-card file-msg-image-card">
+                    <img src="${blobUrl}" class="file-msg-thumb" alt="${item.file.name}">
+                    <div class="file-msg-info">
+                        <div class="file-msg-name">${item.file.name}</div>
+                        <div class="file-msg-sub">${labelMap[cat]}</div>
+                    </div>
+                </div>`;
+
+            // Re-host on Cloudinary in the background for permanent history
+            // (blob URLs die when the tab closes / page reloads)
+            const reader = new FileReader();
+            reader.onload = () => {
+                uploadToCloudinary(reader.result, "shanu-ai/uploads").then(hostedUrl => {
+                    if (hostedUrl) wrap.querySelector(".file-msg-thumb").dataset.cloudinaryUrl = hostedUrl;
+                });
+            };
+            reader.readAsDataURL(item.file);
+
+        } else {
+            wrap.innerHTML = `
+                <div class="file-msg-card">
+                    <div class="file-msg-icon ${cat === "code" ? "text" : cat}">
+                        <i class="fa-solid ${iconMap[cat] || "fa-file"}"></i>
+                    </div>
+                    <div class="file-msg-info">
+                        <div class="file-msg-name">${item.file.name}</div>
+                        <div class="file-msg-sub">${labelMap[cat] || "Attached"}</div>
+                    </div>
+                </div>`;
+        }
         chatBox.appendChild(wrap);
     });
     scrollToBottom();
@@ -540,6 +565,28 @@ async function generatePPT(jsonStr) {
 }
 
 // ------------------------------------------
+// 12.4 Cloudinary Helper — used for both user uploads & AI-generated images
+// ------------------------------------------
+async function uploadToCloudinary(source, folder = "shanu-ai") {
+    try {
+        const res = await fetch("/api/upload", {
+            method:  "POST",
+            headers: { "Content-Type": "application/json" },
+            body:    JSON.stringify({ source, folder })
+        });
+        const data = await res.json();
+        if (!res.ok || !data.url) {
+            console.warn("Cloudinary upload skipped:", data.error || "unknown error");
+            return null;
+        }
+        return data.url;
+    } catch (e) {
+        console.warn("Cloudinary upload failed (non-blocking):", e.message);
+        return null;
+    }
+}
+
+// ------------------------------------------
 // 12.5 Image Generator — Pollinations.ai (Free, no API key)
 // ------------------------------------------
 function generateImage(prompt) {
@@ -589,6 +636,11 @@ function loadPollinationsImage(wrap, uid, prompt, seed) {
         box.appendChild(img);
         actions.style.display = "flex";
         scrollToBottom();
+        // Re-host on Cloudinary in the background so this image survives
+        // permanently (Pollinations URLs can go stale/rate-limited later)
+        uploadToCloudinary(url, "shanu-ai/generated").then(hostedUrl => {
+            if (hostedUrl) img.dataset.cloudinaryUrl = hostedUrl;
+        });
     };
 
     img.onerror = () => {
@@ -614,7 +666,7 @@ function loadPollinationsImage(wrap, uid, prompt, seed) {
 
     dlBtn.onclick = () => {
         const a = document.createElement("a");
-        a.href = url;
+        a.href = img.dataset.cloudinaryUrl || url;
         a.download = `shanu-ai-image-${seed}.jpg`;
         a.target = "_blank";
         a.click();
@@ -1089,21 +1141,37 @@ document.getElementById("settingsBtn")?.addEventListener("click", () => {
 //     anonymous auth resolved, causing empty/wrong history
 // ------------------------------------------
 async function initChat() {
+    // ── Step 1: Instant render from localStorage (no network wait) ──
+    const localHistory = loadLocalHistorySync();
+    let renderedCount = 0;
+    if (localHistory.length > 0) {
+        if (emptyPlaceholder) emptyPlaceholder.style.display = "none";
+        localHistory.forEach(m => {
+            addMessage(m.content, m.role === "user" ? "user" : "bot", false);
+            chatContext.push({ role: m.role, content: m.content });
+        });
+        renderedCount = localHistory.length;
+    }
+
+    // ── Step 2: Confirm/reconcile with Firestore in the background ──
+    //    If Firestore has MORE messages than local (e.g. different device,
+    //    or local cache was cleared), re-render the full authoritative set.
     try {
         await initAuth();      // Trigger anonymous sign-in
         await waitForAuth();   // Block until auth state settles
         const history = await loadHistoryFromDB(30);
 
-        if (history.length > 0) {
-            if (emptyPlaceholder) emptyPlaceholder.style.display = "none";
+        if (history.length > renderedCount) {
+            chatBox.innerHTML = "";
+            chatContext.length = 0;
+            if (history.length > 0 && emptyPlaceholder) emptyPlaceholder.style.display = "none";
             history.forEach(m => {
-                // parseActions = false → don't re-trigger PDF/PPT/Chart on load
                 addMessage(m.content, m.role === "user" ? "user" : "bot", false);
                 chatContext.push({ role: m.role, content: m.content });
             });
         }
     } catch (err) {
-        console.error("Init error:", err);
+        console.error("Init error (localStorage history already shown):", err);
     }
 }
 

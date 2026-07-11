@@ -593,6 +593,28 @@ body {
     margin-top: 2px;
 }
 
+/* Image attachment thumbnail (shows actual image, not just an icon) */
+.msg.file-msg:has(.file-msg-image-card) { max-width: 260px; }
+
+.file-msg-image-card {
+    flex-direction: column;
+    align-items: stretch;
+    padding: 8px;
+    gap: 8px;
+}
+
+.file-msg-thumb {
+    width: 100%;
+    max-height: 220px;
+    object-fit: cover;
+    border-radius: 10px;
+    display: block;
+}
+
+.file-msg-image-card .file-msg-info {
+    padding: 0 4px 2px;
+}
+
 /* Typing Indicator */
 .typing-indicator {
     display: flex;
