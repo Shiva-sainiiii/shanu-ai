@@ -29,88 +29,36 @@ export default async function handler(req, res) {
 
         const systemPrompt = getMoodPrompt(mood);
 
-        // ── Detect if any message carries actual image content ────
-        //    (OpenAI-style multipart content array with an image_url part)
-        //    If so, switch to a vision-capable free model so the AI can
-        //    actually "see" the picture — not just guess from filename.
-        const hasImage = messages.some(m =>
-            Array.isArray(m.content) && m.content.some(part => part.type === "image_url")
-        );
+        // ── OpenRouter API Call ───────────────────────────────
+        const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+            method: "POST",
+            headers: {
+                "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
+                "Content-Type":  "application/json",
+                "HTTP-Referer":  "https://shanu-ai.vercel.app",
+                "X-Title":       "Shanu AI"
+            },
+            body: JSON.stringify({
+                model:       "nvidia/nemotron-3-nano-30b-a3b:free",
+                messages: [
+                    { role: "system", content: systemPrompt },
+                    ...messages
+                ],
+                temperature: 0.82,
+                max_tokens:  1200,   // Increased for action tags (PPT JSON can be large)
+                top_p:       0.95
+            })
+        });
 
-        // Vision: named, verified-live free models that support image input.
-        // (Dropped the openrouter/free auto-router — it was picking an
-        // unpredictable model that returned safety-classifier-style output
-        // instead of actually describing the image.)
-        const visionModels = [
-            "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
-            "google/gemma-4-31b-it:free"
-        ];
-        const textModel = "nvidia/nemotron-3-nano-30b-a3b:free";
+        const data = await response.json();
 
-        const modelsToTry = hasImage ? visionModels : [textModel];
-
-        // ── OpenRouter API Call (with fallback chain) ───────────────
-        let data, response, reply = "";
-        let gotUsableReply = false;
-        const attemptErrors = [];
-        for (const model of modelsToTry) {
-            response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-                method: "POST",
-                headers: {
-                    "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
-                    "Content-Type":  "application/json",
-                    "HTTP-Referer":  "https://shanu-ai.vercel.app",
-                    "X-Title":       "Shanu AI"
-                },
-                body: JSON.stringify({
-                    model,
-                    messages: [
-                        { role: "system", content: systemPrompt },
-                        ...messages
-                    ],
-                    temperature: 0.82,
-                    max_tokens:  1200,   // Increased for action tags (PPT JSON can be large)
-                    top_p:       0.95
-                })
-            });
-
-            data = await response.json();
-
-            if (response.ok) {
-                const candidate = data?.choices?.[0]?.message?.content?.trim() || "";
-
-                // ── Reject non-answers that still return HTTP 200 ──
-                //    Some free models occasionally emit only their internal
-                //    safety-classifier metadata (e.g. "User Safety: safe
-                //    Response Safety: safe") instead of an actual reply.
-                //    That's a 200 OK but not a usable answer — try the
-                //    next model in the chain instead of accepting it.
-                const looksLikeSafetyMetadata =
-                    /user safety\s*:/i.test(candidate) || /response safety\s*:/i.test(candidate);
-
-                if (candidate && !looksLikeSafetyMetadata) {
-                    reply = candidate;
-                    gotUsableReply = true;
-                    break; // good answer — stop here
-                }
-
-                attemptErrors.push(`${model} → returned no usable content (safety-metadata or empty)`);
-                console.error(`Model ${model} returned unusable content:`, candidate);
-                continue;
-            }
-
-            const reason = data?.error?.message || data?.message || "Unknown error";
-            attemptErrors.push(`${model} → ${reason}`);
-            console.error(`OpenRouter Error with model ${model}:`, JSON.stringify(data));
+        if (!response.ok) {
+            console.error("OpenRouter Error:", data);
+            return res.status(500).json({ reply: "AI ne jawab dene se mana kar diya 😅 Try again!" });
         }
 
-        if (!gotUsableReply) {
-            // Surface every attempt's real reason instead of a generic
-            // message — makes it possible to actually debug from the UI.
-            return res.status(500).json({
-                reply: `AI ne jawab dene se mana kar diya 😅\n\nDebug:\n${attemptErrors.join("\n")}`
-            });
-        }
+        const reply = data?.choices?.[0]?.message?.content?.trim()
+            || "Hmm... samajh nahi aaya 🤔";
 
         return res.status(200).json({ reply });
 
@@ -142,9 +90,6 @@ You are Shanu AI, created by Shiva Saini. Current Year: 2026.
 - For multiple files: analyze each one, then give a cross-file summary if relevant.
 - For PDFs/images: understand context and answer user's question about that content specifically.
 - Be thorough and structured for analysis tasks. Use clear sections if needed.
-- When an actual image is attached (you can visually see it, not just extracted text): describe what's
-  actually in the picture — objects, people, scene, colors, mood — before answering the user's question.
-  Don't guess from the filename; describe only what you can genuinely see.
 
 ━━━ SMART OUTPUT TAGS ━━━
 Use these ONLY when the user explicitly asks for that type of output.
