@@ -37,36 +37,54 @@ export default async function handler(req, res) {
             Array.isArray(m.content) && m.content.some(part => part.type === "image_url")
         );
 
-        const model = hasImage
-            ? "google/gemma-4-31b-it:free"        // vision-capable free model
-            : "nvidia/nemotron-3-nano-30b-a3b:free"; // text-only, faster/cheaper
+        // Multiple free vision models as fallbacks — free-tier models on
+        // OpenRouter can be rate-limited or rotate out; trying a short
+        // chain avoids a hard failure just because the first pick is busy.
+        const visionModels = [
+            "google/gemma-4-31b-it:free",
+            "meta-llama/llama-3.2-11b-vision-instruct:free",
+            "qwen/qwen2.5-vl-32b-instruct:free"
+        ];
+        const textModel = "nvidia/nemotron-3-nano-30b-a3b:free";
 
-        // ── OpenRouter API Call ───────────────────────────────
-        const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-            method: "POST",
-            headers: {
-                "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
-                "Content-Type":  "application/json",
-                "HTTP-Referer":  "https://shanu-ai.vercel.app",
-                "X-Title":       "Shanu AI"
-            },
-            body: JSON.stringify({
-                model,
-                messages: [
-                    { role: "system", content: systemPrompt },
-                    ...messages
-                ],
-                temperature: 0.82,
-                max_tokens:  1200,   // Increased for action tags (PPT JSON can be large)
-                top_p:       0.95
-            })
-        });
+        const modelsToTry = hasImage ? visionModels : [textModel];
 
-        const data = await response.json();
+        // ── OpenRouter API Call (with fallback chain) ───────────────
+        let data, response, lastError;
+        for (const model of modelsToTry) {
+            response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+                method: "POST",
+                headers: {
+                    "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
+                    "Content-Type":  "application/json",
+                    "HTTP-Referer":  "https://shanu-ai.vercel.app",
+                    "X-Title":       "Shanu AI"
+                },
+                body: JSON.stringify({
+                    model,
+                    messages: [
+                        { role: "system", content: systemPrompt },
+                        ...messages
+                    ],
+                    temperature: 0.82,
+                    max_tokens:  1200,   // Increased for action tags (PPT JSON can be large)
+                    top_p:       0.95
+                })
+            });
+
+            data = await response.json();
+
+            if (response.ok) break; // success — stop trying further models
+
+            lastError = data;
+            console.error(`OpenRouter Error with model ${model}:`, JSON.stringify(data));
+        }
 
         if (!response.ok) {
-            console.error("OpenRouter Error:", data);
-            return res.status(500).json({ reply: "AI ne jawab dene se mana kar diya 😅 Try again!" });
+            // Surface the real reason instead of a generic message —
+            // makes it possible to actually debug from the UI.
+            const reason = lastError?.error?.message || lastError?.message || "Unknown error";
+            return res.status(500).json({ reply: `AI ne jawab dene se mana kar diya 😅\n\nDebug: ${reason}` });
         }
 
         const reply = data?.choices?.[0]?.message?.content?.trim()
