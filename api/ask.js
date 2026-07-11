@@ -37,20 +37,24 @@ export default async function handler(req, res) {
             Array.isArray(m.content) && m.content.some(part => part.type === "image_url")
         );
 
-        // Multiple free vision models as fallbacks — free-tier models on
-        // OpenRouter can be rate-limited or rotate out; trying a short
-        // chain avoids a hard failure just because the first pick is busy.
+        // Vision: use OpenRouter's auto-router. It automatically picks a
+        // live, capacity-available free model that supports image input
+        // — avoids hardcoding a specific slug that can go stale/deprecated
+        // (e.g. qwen2.5-vl-32b-instruct:free no longer has any endpoint).
+        // Fallback chain still tries named models in case the router
+        // itself has an off moment.
         const visionModels = [
+            "openrouter/free",
             "google/gemma-4-31b-it:free",
-            "meta-llama/llama-3.2-11b-vision-instruct:free",
-            "qwen/qwen2.5-vl-32b-instruct:free"
+            "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"
         ];
         const textModel = "nvidia/nemotron-3-nano-30b-a3b:free";
 
         const modelsToTry = hasImage ? visionModels : [textModel];
 
         // ── OpenRouter API Call (with fallback chain) ───────────────
-        let data, response, lastError;
+        let data, response;
+        const attemptErrors = [];
         for (const model of modelsToTry) {
             response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
                 method: "POST",
@@ -76,15 +80,17 @@ export default async function handler(req, res) {
 
             if (response.ok) break; // success — stop trying further models
 
-            lastError = data;
+            const reason = data?.error?.message || data?.message || "Unknown error";
+            attemptErrors.push(`${model} → ${reason}`);
             console.error(`OpenRouter Error with model ${model}:`, JSON.stringify(data));
         }
 
         if (!response.ok) {
-            // Surface the real reason instead of a generic message —
-            // makes it possible to actually debug from the UI.
-            const reason = lastError?.error?.message || lastError?.message || "Unknown error";
-            return res.status(500).json({ reply: `AI ne jawab dene se mana kar diya 😅\n\nDebug: ${reason}` });
+            // Surface every attempt's real reason instead of a generic
+            // message — makes it possible to actually debug from the UI.
+            return res.status(500).json({
+                reply: `AI ne jawab dene se mana kar diya 😅\n\nDebug:\n${attemptErrors.join("\n")}`
+            });
         }
 
         const reply = data?.choices?.[0]?.message?.content?.trim()
