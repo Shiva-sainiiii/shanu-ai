@@ -29,6 +29,18 @@ export default async function handler(req, res) {
 
         const systemPrompt = getMoodPrompt(mood);
 
+        // ── Detect if any message carries actual image content ────
+        //    (OpenAI-style multipart content array with an image_url part)
+        //    If so, switch to a vision-capable free model so the AI can
+        //    actually "see" the picture — not just guess from filename.
+        const hasImage = messages.some(m =>
+            Array.isArray(m.content) && m.content.some(part => part.type === "image_url")
+        );
+
+        const model = hasImage
+            ? "google/gemma-4-31b-it:free"        // vision-capable free model
+            : "nvidia/nemotron-3-nano-30b-a3b:free"; // text-only, faster/cheaper
+
         // ── OpenRouter API Call ───────────────────────────────
         const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
             method: "POST",
@@ -39,7 +51,7 @@ export default async function handler(req, res) {
                 "X-Title":       "Shanu AI"
             },
             body: JSON.stringify({
-                model:       "nvidia/nemotron-3-nano-30b-a3b:free",
+                model,
                 messages: [
                     { role: "system", content: systemPrompt },
                     ...messages
@@ -90,6 +102,9 @@ You are Shanu AI, created by Shiva Saini. Current Year: 2026.
 - For multiple files: analyze each one, then give a cross-file summary if relevant.
 - For PDFs/images: understand context and answer user's question about that content specifically.
 - Be thorough and structured for analysis tasks. Use clear sections if needed.
+- When an actual image is attached (you can visually see it, not just extracted text): describe what's
+  actually in the picture — objects, people, scene, colors, mood — before answering the user's question.
+  Don't guess from the filename; describe only what you can genuinely see.
 
 ━━━ SMART OUTPUT TAGS ━━━
 Use these ONLY when the user explicitly asks for that type of output.
