@@ -926,6 +926,8 @@ async function callAPI() {
 // ------------------------------------------
 // 20. Multi-File Processing Pipeline
 // ------------------------------------------
+const OCR_MIN_CHARS = 15; // below this, treat OCR result as "no real text" → use vision fallback
+
 async function processAndSendFiles() {
     const question = inputBox.value.trim();
     inputBox.value = ""; resizeInput();
@@ -934,6 +936,7 @@ async function processAndSendFiles() {
 
     const total = selectedFiles.length;
     let combined = "";
+    const imageParts = []; // base64 image_url parts for files that need vision fallback
 
     for (let i = 0; i < total; i++) {
         const { file } = selectedFiles[i];
@@ -944,11 +947,30 @@ async function processAndSendFiles() {
         updateProgress(Math.round((i / total) * 85));
 
         let text = "";
+        let usedVisionFallback = false;
         try {
-            if      (cat === "image") { setChipStatus(i, "Running OCR...",   "processing"); text = await extractTextFromImage(file, i, total); }
-            else if (cat === "pdf")   { setChipStatus(i, "Extracting PDF...", "processing"); text = await extractTextFromPDF(file); }
-            else                      { setChipStatus(i, "Reading file...",   "processing"); text = await readTextFile(file); }
-            setChipStatus(i, "✅ Done", "done");
+            if (cat === "image") {
+                setChipStatus(i, "Running OCR...", "processing");
+                text = await extractTextFromImage(file, i, total);
+
+                // ── Smart fallback: OCR found no meaningful text ──
+                //    → this is likely a photo/object, not a document/screenshot.
+                //    Send the raw image to a vision model instead so the AI
+                //    can actually SEE it (pig, car, scenery, whatever it is).
+                if (text.trim().length < OCR_MIN_CHARS) {
+                    setChipStatus(i, "Analyzing image...", "processing");
+                    const base64 = await fileToBase64(file);
+                    imageParts.push({
+                        type: "image_url",
+                        image_url: { url: base64 }
+                    });
+                    usedVisionFallback = true;
+                    text = "[No readable text — image sent for direct visual analysis]";
+                }
+            }
+            else if (cat === "pdf") { setChipStatus(i, "Extracting PDF...", "processing"); text = await extractTextFromPDF(file); }
+            else                    { setChipStatus(i, "Reading file...",   "processing"); text = await readTextFile(file); }
+            setChipStatus(i, usedVisionFallback ? "✅ Vision analyzed" : "✅ Done", "done");
         } catch (err) {
             console.error(`Error on ${file.name}:`, err);
             setChipStatus(i, "❌ Failed", "error");
@@ -969,12 +991,41 @@ async function processAndSendFiles() {
 
     const dbSummary = `[Files: ${selectedFiles.map(i => i.file.name).join(", ")}]${question ? " — " + question : ""}`;
 
-    chatContext.push({ role: "user", content: contextMsg });
+    // ── If any image needs vision analysis, send as multipart content ──
+    //    (OpenAI-style: array of {type:"text"} + {type:"image_url"} parts)
+    //    ask.js detects this shape and auto-switches to a vision model.
+    if (imageParts.length > 0) {
+        chatContext.push({
+            role: "user",
+            content: [{ type: "text", text: contextMsg }, ...imageParts]
+        });
+    } else {
+        chatContext.push({ role: "user", content: contextMsg });
+    }
     await saveMessageToDB("user", dbSummary);
 
     clearAllFiles();
     unlockUI();
     await callAPI();
+
+    // ── Swap heavy base64 image data out of context after this turn ──
+    //    Keeps follow-up messages lightweight (like PDFs/code already are —
+    //    the AI's reply already captured what it saw; no need to resend
+    //    the raw image on every subsequent message in this conversation).
+    if (imageParts.length > 0) {
+        const idx = chatContext.findIndex(m => Array.isArray(m.content));
+        if (idx !== -1) chatContext[idx] = { role: "user", content: contextMsg };
+    }
+}
+
+// ── Convert a File to a base64 data URL (for vision model input) ──
+function fileToBase64(file) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload  = () => resolve(reader.result);
+        reader.onerror = () => reject(new Error("Failed to read file for vision analysis"));
+        reader.readAsDataURL(file);
+    });
 }
 
 // ------------------------------------------
