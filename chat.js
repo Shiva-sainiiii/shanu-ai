@@ -411,6 +411,14 @@ function parseAndExecuteActions(rawText) {
         indicator = `<i class="fa-solid fa-eye"></i> Live preview opened`;
     }
 
+    // [IMAGE]prompt[/IMAGE]
+    const imageMatch = text.match(/\[IMAGE\]([\s\S]*?)\[\/IMAGE\]/i);
+    if (imageMatch) {
+        text = text.replace(imageMatch[0], "").trim();
+        setTimeout(() => generateImage(imageMatch[1].trim()), 120);
+        // No indicator pill — image renders inline in chat bubble
+    }
+
     return {
         cleanText: text.trim() || "✅ Done! Check above for your output.",
         indicator
@@ -529,6 +537,95 @@ async function generatePPT(jsonStr) {
         console.error("PPT Error:", e);
         showToast("⚠️ PPT failed. Try saying 'retry PPT'.");
     }
+}
+
+// ------------------------------------------
+// 12.5 Image Generator — Pollinations.ai (Free, no API key)
+// ------------------------------------------
+function generateImage(prompt) {
+    if (!prompt) { showToast("⚠️ Image prompt empty."); return; }
+
+    const wrap = document.createElement("div");
+    wrap.className = "chart-wrap image-wrap";
+    const uid  = `img_${Date.now()}`;
+    const seed = Math.floor(Math.random() * 1000000);
+
+    wrap.innerHTML = `
+        <div class="chart-wrap-label">
+            <i class="fa-solid fa-image" style="color:var(--primary)"></i>
+            AI Generated Image
+        </div>
+        <div class="image-gen-box" id="${uid}">
+            <div class="image-gen-loading">
+                <i class="fa-solid fa-spinner fa-spin"></i>
+                <span>Painting your image...</span>
+            </div>
+        </div>
+        <div class="image-gen-actions" style="display:none">
+            <button class="msg-action-btn image-download-btn">
+                <i class="fa-solid fa-download"></i> Download
+            </button>
+            <button class="msg-action-btn image-retry-btn">
+                <i class="fa-solid fa-rotate"></i> Regenerate
+            </button>
+        </div>`;
+    chatBox.appendChild(wrap);
+    scrollToBottom();
+
+    loadPollinationsImage(wrap, uid, prompt, seed);
+}
+
+function loadPollinationsImage(wrap, uid, prompt, seed) {
+    const box     = wrap.querySelector(`#${uid}`);
+    const actions = wrap.querySelector(".image-gen-actions");
+    const url     = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=1024&height=1024&seed=${seed}&nologo=true`;
+
+    const img = new Image();
+    img.alt = prompt;
+    img.className = "image-gen-result";
+
+    img.onload = () => {
+        box.innerHTML = "";
+        box.appendChild(img);
+        actions.style.display = "flex";
+        scrollToBottom();
+    };
+
+    img.onerror = () => {
+        box.innerHTML = `
+            <div class="image-gen-error">
+                <i class="fa-solid fa-triangle-exclamation"></i>
+                <span>Image generate nahi ho payi 😅</span>
+                <button class="msg-action-btn image-retry-inline-btn">
+                    <i class="fa-solid fa-rotate"></i> Try Again
+                </button>
+            </div>`;
+        box.querySelector(".image-retry-inline-btn")?.addEventListener("click", () => {
+            box.innerHTML = `<div class="image-gen-loading"><i class="fa-solid fa-spinner fa-spin"></i><span>Painting your image...</span></div>`;
+            loadPollinationsImage(wrap, uid, prompt, Math.floor(Math.random() * 1000000));
+        });
+    };
+
+    img.src = url;
+
+    // Wire up download + regenerate (fresh bind each load to avoid duplicates)
+    const dlBtn    = wrap.querySelector(".image-download-btn");
+    const retryBtn = wrap.querySelector(".image-retry-btn");
+
+    dlBtn.onclick = () => {
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `shanu-ai-image-${seed}.jpg`;
+        a.target = "_blank";
+        a.click();
+        showToast("🖼️ Image download shuru ho gaya!");
+    };
+
+    retryBtn.onclick = () => {
+        actions.style.display = "none";
+        box.innerHTML = `<div class="image-gen-loading"><i class="fa-solid fa-spinner fa-spin"></i><span>Painting your image...</span></div>`;
+        loadPollinationsImage(wrap, uid, prompt, Math.floor(Math.random() * 1000000));
+    };
 }
 
 // ------------------------------------------

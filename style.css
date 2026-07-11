@@ -1295,6 +1295,55 @@ body {
     font-weight: 600;
 }
 
+/* ---- Image Generation (Pollinations.ai) ---- */
+.image-gen-box {
+    width: 100%;
+    min-height: 220px;
+    border-radius: 14px;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid var(--glass-border);
+}
+
+.image-gen-result {
+    width: 100%;
+    height: auto;
+    display: block;
+    border-radius: 14px;
+    animation: popIn 0.3s ease forwards;
+}
+
+.image-gen-loading,
+.image-gen-error {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    padding: 40px 20px;
+    color: var(--text-muted);
+    font-size: 13px;
+    text-align: center;
+}
+
+.image-gen-loading i {
+    font-size: 22px;
+    color: var(--primary);
+}
+
+.image-gen-error i {
+    font-size: 20px;
+    color: var(--accent-rose, #F43F5E);
+}
+
+.image-gen-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 12px;
+}
+
 /* ---- Action Result Pill (shown after PDF/PPT/Preview) ---- */
 .action-result-pill {
     align-self: flex-start;
