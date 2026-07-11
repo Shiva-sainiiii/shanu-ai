@@ -344,7 +344,7 @@ function addFileBubbles() {
     hidePlaceholder();
     const iconMap  = { image: "fa-image", pdf: "fa-file-pdf", code: "fa-code", text: "fa-file-lines" };
     const labelMap = {
-        image: "Image — AI Vision analyzed",
+        image: "Image — OCR extracted",
         pdf:   "PDF — text extracted",
         code:  "Code file — analyzed",
         text:  "Text file — read"
@@ -934,7 +934,6 @@ async function processAndSendFiles() {
 
     const total = selectedFiles.length;
     let combined = "";
-    const imageParts = []; // base64 image_url parts — every image goes here now
 
     for (let i = 0; i < total; i++) {
         const { file } = selectedFiles[i];
@@ -946,25 +945,10 @@ async function processAndSendFiles() {
 
         let text = "";
         try {
-            if (cat === "image") {
-                // ── Every image goes straight to the vision model. ──
-                //    No OCR pre-check: OCR engines (Tesseract) frequently
-                //    hallucinate garbled "text" out of pure photos/objects
-                //    (noise, textures, random shapes read as characters),
-                //    which was silently skipping vision analysis entirely.
-                //    Direct vision call is the only reliable way to know
-                //    what's actually in the picture.
-                setChipStatus(i, "Analyzing image...", "processing");
-                const base64 = await fileToBase64(file);
-                imageParts.push({
-                    type: "image_url",
-                    image_url: { url: base64 }
-                });
-                text = "[Image sent for direct visual analysis]";
-            }
-            else if (cat === "pdf") { setChipStatus(i, "Extracting PDF...", "processing"); text = await extractTextFromPDF(file); }
-            else                    { setChipStatus(i, "Reading file...",   "processing"); text = await readTextFile(file); }
-            setChipStatus(i, cat === "image" ? "✅ Vision analyzed" : "✅ Done", "done");
+            if      (cat === "image") { setChipStatus(i, "Running OCR...",   "processing"); text = await extractTextFromImage(file, i, total); }
+            else if (cat === "pdf")   { setChipStatus(i, "Extracting PDF...", "processing"); text = await extractTextFromPDF(file); }
+            else                      { setChipStatus(i, "Reading file...",   "processing"); text = await readTextFile(file); }
+            setChipStatus(i, "✅ Done", "done");
         } catch (err) {
             console.error(`Error on ${file.name}:`, err);
             setChipStatus(i, "❌ Failed", "error");
@@ -985,52 +969,18 @@ async function processAndSendFiles() {
 
     const dbSummary = `[Files: ${selectedFiles.map(i => i.file.name).join(", ")}]${question ? " — " + question : ""}`;
 
-    // ── If any image was attached, send as multipart content ──
-    //    (OpenAI-style: array of {type:"text"} + {type:"image_url"} parts)
-    //    ask.js detects this shape and auto-switches to a vision model.
-    if (imageParts.length > 0) {
-        chatContext.push({
-            role: "user",
-            content: [{ type: "text", text: contextMsg }, ...imageParts]
-        });
-    } else {
-        chatContext.push({ role: "user", content: contextMsg });
-    }
+    chatContext.push({ role: "user", content: contextMsg });
     await saveMessageToDB("user", dbSummary);
 
     clearAllFiles();
     unlockUI();
     await callAPI();
-
-    // ── Swap heavy base64 image data out of context after this turn ──
-    //    Keeps follow-up messages lightweight (like PDFs/code already are —
-    //    the AI's reply already captured what it saw; no need to resend
-    //    the raw image on every subsequent message in this conversation).
-    if (imageParts.length > 0) {
-        const idx = chatContext.findIndex(m => Array.isArray(m.content));
-        if (idx !== -1) chatContext[idx] = { role: "user", content: contextMsg };
-    }
-}
-
-// ── Convert a File to a base64 data URL (for vision model input) ──
-function fileToBase64(file) {
-    return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload  = () => resolve(reader.result);
-        reader.onerror = () => reject(new Error("Failed to read file for vision analysis"));
-        reader.readAsDataURL(file);
-    });
 }
 
 // ------------------------------------------
-// 21. preprocessImage + extractTextFromImage
-//     ⚠️ NOT CALLED ANYMORE in the image pipeline (see processAndSendFiles).
-//     OCR was removed from the image decision path because Tesseract
-//     hallucinates garbled "text" out of pure photos/objects (noise,
-//     textures read as characters), which silently skipped vision
-//     analysis. Every image now goes straight to the vision model instead.
-//     Kept here in case OCR-specific document scanning is wired back in
-//     as an explicit, separate feature later.
+// 21. ✅ RESTORED: preprocessImage (from old version)
+//     File → ObjectURL → Canvas → Grayscale+Contrast boost → Tesseract
+//     Much better OCR accuracy than passing raw file directly
 // ------------------------------------------
 async function preprocessImage(file) {
     return new Promise((resolve, reject) => {
