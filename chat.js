@@ -344,7 +344,7 @@ function addFileBubbles() {
     hidePlaceholder();
     const iconMap  = { image: "fa-image", pdf: "fa-file-pdf", code: "fa-code", text: "fa-file-lines" };
     const labelMap = {
-        image: "Image — OCR extracted",
+        image: "Image — AI Vision analyzed",
         pdf:   "PDF — text extracted",
         code:  "Code file — analyzed",
         text:  "Text file — read"
@@ -926,8 +926,6 @@ async function callAPI() {
 // ------------------------------------------
 // 20. Multi-File Processing Pipeline
 // ------------------------------------------
-const OCR_MIN_CHARS = 15; // below this, treat OCR result as "no real text" → use vision fallback
-
 async function processAndSendFiles() {
     const question = inputBox.value.trim();
     inputBox.value = ""; resizeInput();
@@ -936,7 +934,7 @@ async function processAndSendFiles() {
 
     const total = selectedFiles.length;
     let combined = "";
-    const imageParts = []; // base64 image_url parts for files that need vision fallback
+    const imageParts = []; // base64 image_url parts — every image goes here now
 
     for (let i = 0; i < total; i++) {
         const { file } = selectedFiles[i];
@@ -947,30 +945,26 @@ async function processAndSendFiles() {
         updateProgress(Math.round((i / total) * 85));
 
         let text = "";
-        let usedVisionFallback = false;
         try {
             if (cat === "image") {
-                setChipStatus(i, "Running OCR...", "processing");
-                text = await extractTextFromImage(file, i, total);
-
-                // ── Smart fallback: OCR found no meaningful text ──
-                //    → this is likely a photo/object, not a document/screenshot.
-                //    Send the raw image to a vision model instead so the AI
-                //    can actually SEE it (pig, car, scenery, whatever it is).
-                if (text.trim().length < OCR_MIN_CHARS) {
-                    setChipStatus(i, "Analyzing image...", "processing");
-                    const base64 = await fileToBase64(file);
-                    imageParts.push({
-                        type: "image_url",
-                        image_url: { url: base64 }
-                    });
-                    usedVisionFallback = true;
-                    text = "[No readable text — image sent for direct visual analysis]";
-                }
+                // ── Every image goes straight to the vision model. ──
+                //    No OCR pre-check: OCR engines (Tesseract) frequently
+                //    hallucinate garbled "text" out of pure photos/objects
+                //    (noise, textures, random shapes read as characters),
+                //    which was silently skipping vision analysis entirely.
+                //    Direct vision call is the only reliable way to know
+                //    what's actually in the picture.
+                setChipStatus(i, "Analyzing image...", "processing");
+                const base64 = await fileToBase64(file);
+                imageParts.push({
+                    type: "image_url",
+                    image_url: { url: base64 }
+                });
+                text = "[Image sent for direct visual analysis]";
             }
             else if (cat === "pdf") { setChipStatus(i, "Extracting PDF...", "processing"); text = await extractTextFromPDF(file); }
             else                    { setChipStatus(i, "Reading file...",   "processing"); text = await readTextFile(file); }
-            setChipStatus(i, usedVisionFallback ? "✅ Vision analyzed" : "✅ Done", "done");
+            setChipStatus(i, cat === "image" ? "✅ Vision analyzed" : "✅ Done", "done");
         } catch (err) {
             console.error(`Error on ${file.name}:`, err);
             setChipStatus(i, "❌ Failed", "error");
@@ -991,7 +985,7 @@ async function processAndSendFiles() {
 
     const dbSummary = `[Files: ${selectedFiles.map(i => i.file.name).join(", ")}]${question ? " — " + question : ""}`;
 
-    // ── If any image needs vision analysis, send as multipart content ──
+    // ── If any image was attached, send as multipart content ──
     //    (OpenAI-style: array of {type:"text"} + {type:"image_url"} parts)
     //    ask.js detects this shape and auto-switches to a vision model.
     if (imageParts.length > 0) {
@@ -1029,9 +1023,14 @@ function fileToBase64(file) {
 }
 
 // ------------------------------------------
-// 21. ✅ RESTORED: preprocessImage (from old version)
-//     File → ObjectURL → Canvas → Grayscale+Contrast boost → Tesseract
-//     Much better OCR accuracy than passing raw file directly
+// 21. preprocessImage + extractTextFromImage
+//     ⚠️ NOT CALLED ANYMORE in the image pipeline (see processAndSendFiles).
+//     OCR was removed from the image decision path because Tesseract
+//     hallucinates garbled "text" out of pure photos/objects (noise,
+//     textures read as characters), which silently skipped vision
+//     analysis. Every image now goes straight to the vision model instead.
+//     Kept here in case OCR-specific document scanning is wired back in
+//     as an explicit, separate feature later.
 // ------------------------------------------
 async function preprocessImage(file) {
     return new Promise((resolve, reject) => {
