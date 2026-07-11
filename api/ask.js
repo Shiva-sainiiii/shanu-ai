@@ -37,23 +37,21 @@ export default async function handler(req, res) {
             Array.isArray(m.content) && m.content.some(part => part.type === "image_url")
         );
 
-        // Vision: use OpenRouter's auto-router. It automatically picks a
-        // live, capacity-available free model that supports image input
-        // — avoids hardcoding a specific slug that can go stale/deprecated
-        // (e.g. qwen2.5-vl-32b-instruct:free no longer has any endpoint).
-        // Fallback chain still tries named models in case the router
-        // itself has an off moment.
+        // Vision: named, verified-live free models that support image input.
+        // (Dropped the openrouter/free auto-router — it was picking an
+        // unpredictable model that returned safety-classifier-style output
+        // instead of actually describing the image.)
         const visionModels = [
-            "openrouter/free",
-            "google/gemma-4-31b-it:free",
-            "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"
+            "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+            "google/gemma-4-31b-it:free"
         ];
         const textModel = "nvidia/nemotron-3-nano-30b-a3b:free";
 
         const modelsToTry = hasImage ? visionModels : [textModel];
 
         // ── OpenRouter API Call (with fallback chain) ───────────────
-        let data, response;
+        let data, response, reply = "";
+        let gotUsableReply = false;
         const attemptErrors = [];
         for (const model of modelsToTry) {
             response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
@@ -78,23 +76,41 @@ export default async function handler(req, res) {
 
             data = await response.json();
 
-            if (response.ok) break; // success — stop trying further models
+            if (response.ok) {
+                const candidate = data?.choices?.[0]?.message?.content?.trim() || "";
+
+                // ── Reject non-answers that still return HTTP 200 ──
+                //    Some free models occasionally emit only their internal
+                //    safety-classifier metadata (e.g. "User Safety: safe
+                //    Response Safety: safe") instead of an actual reply.
+                //    That's a 200 OK but not a usable answer — try the
+                //    next model in the chain instead of accepting it.
+                const looksLikeSafetyMetadata =
+                    /user safety\s*:/i.test(candidate) || /response safety\s*:/i.test(candidate);
+
+                if (candidate && !looksLikeSafetyMetadata) {
+                    reply = candidate;
+                    gotUsableReply = true;
+                    break; // good answer — stop here
+                }
+
+                attemptErrors.push(`${model} → returned no usable content (safety-metadata or empty)`);
+                console.error(`Model ${model} returned unusable content:`, candidate);
+                continue;
+            }
 
             const reason = data?.error?.message || data?.message || "Unknown error";
             attemptErrors.push(`${model} → ${reason}`);
             console.error(`OpenRouter Error with model ${model}:`, JSON.stringify(data));
         }
 
-        if (!response.ok) {
+        if (!gotUsableReply) {
             // Surface every attempt's real reason instead of a generic
             // message — makes it possible to actually debug from the UI.
             return res.status(500).json({
                 reply: `AI ne jawab dene se mana kar diya 😅\n\nDebug:\n${attemptErrors.join("\n")}`
             });
         }
-
-        const reply = data?.choices?.[0]?.message?.content?.trim()
-            || "Hmm... samajh nahi aaya 🤔";
 
         return res.status(200).json({ reply });
 
