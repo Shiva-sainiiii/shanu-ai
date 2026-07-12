@@ -88,8 +88,9 @@ shanu-ai/
 ├── firebase.js         # Firebase connection, Firestore helpers & LocalStorage backup layer
 │
 └── api/
-    ├── ask.js          # Serverless backend — OpenRouter API handler (Vercel)
-    └── upload.js       # Serverless backend — Cloudinary upload handler (Vercel)
+    ├── ask.js
+    ├── upload.js
+    └── vision.js       ← yaha
 ```
 
 ---
