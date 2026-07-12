@@ -1002,7 +1002,13 @@ async function processAndSendFiles() {
         } catch (err) {
             console.error(`Error on ${file.name}:`, err);
             setChipStatus(i, "❌ Failed", "error");
-            text = "[File could not be read]";
+            // Surface the real reason in the text sent to the AI too —
+            // so instead of a confusing "I can't see images" reply, the
+            // user sees exactly why it failed (e.g. rate limit).
+            text = `[Could not analyze image — ${err.message || "unknown error"}]`;
+            if (cat === "image" && imageMode === "photo") {
+                showToast(`⚠️ AI Vision failed: ${err.message || "try again in a few seconds"}`);
+            }
         }
 
         const content = (cat === "code")
@@ -1054,7 +1060,13 @@ async function describeImageWithPollinations(file) {
         body:    JSON.stringify(payload)
     });
 
-    if (!res.ok) throw new Error(`Pollinations Vision failed (${res.status})`);
+    if (res.status === 429) {
+        throw new Error("Rate limited — Pollinations allows 1 image request per ~15s on the free tier. Wait a moment and try again.");
+    }
+    if (!res.ok) {
+        const errText = await res.text().catch(() => "");
+        throw new Error(`Pollinations Vision failed (${res.status}) ${errText.slice(0, 150)}`);
+    }
 
     const data = await res.json();
     const description = data?.choices?.[0]?.message?.content?.trim();
