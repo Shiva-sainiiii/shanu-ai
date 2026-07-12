@@ -1069,9 +1069,26 @@ async function describeImageWithPollinations(file) {
     }
 
     const data = await res.json();
+    console.log("Pollinations raw response:", JSON.stringify(data).slice(0, 500));
+
     const description = data?.choices?.[0]?.message?.content?.trim();
 
-    if (!description) throw new Error("Pollinations Vision returned empty response");
+    if (!description) {
+        throw new Error(`Pollinations Vision returned empty content. Raw: ${JSON.stringify(data).slice(0, 200)}`);
+    }
+
+    // ── Reject non-answers that still come back as 200 OK ──
+    //    Some models occasionally refuse or claim they can't see images
+    //    even when handed one correctly. Surface that clearly instead of
+    //    quietly passing a useless "I can't see images" reply to the AI.
+    const looksLikeRefusal =
+        /\b(cannot|can't|unable to)\s+(see|view|access|analyze|process)\b/i.test(description) ||
+        /\bi don'?t have (the )?(ability|permission|capability)\b/i.test(description);
+
+    if (looksLikeRefusal) {
+        throw new Error(`Pollinations model refused/couldn't see the image. It said: "${description.slice(0, 150)}"`);
+    }
+
     return description;
 }
 
