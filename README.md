@@ -51,6 +51,7 @@ Whether you want a witty roast partner, a sarcastic companion, or a supportive f
 |---|---|
 | 🎭 **Mood Selector** | 8+ unique moods (Girlfriend, Boyfriend, Roast, Sarcastic, and more) that reshape the AI's entire personality |
 | 🎨 **Text-to-Image Generation** | Just ask — "banao ek sunset ki photo" — and Shanu generates a full AI image inline, powered by Pollinations.ai (free, no API key) |
+| 👁️ **Dual-Mode Image Understanding** | Upload an image and choose **Document** (OCR text extraction via Tesseract) or **Photo** (AI Vision via Pollinations describes objects/scenes) — you decide, no guessing |
 | ☁️ **Cloudinary Media Hosting** | User-uploaded images and AI-generated images are permanently hosted on Cloudinary — nothing expires or breaks |
 | 💎 **Glassmorphism UI** | Modern frosted-glass aesthetic with fluid blob animations and a polished dark theme |
 | 💾 **Persistent Memory (Firebase + LocalStorage)** | Firestore stores chat history in the cloud, with a localStorage write-through cache for instant loads and offline-safe fallback |

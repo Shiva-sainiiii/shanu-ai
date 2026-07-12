@@ -344,7 +344,7 @@ function addFileBubbles() {
     hidePlaceholder();
     const iconMap  = { image: "fa-image", pdf: "fa-file-pdf", code: "fa-code", text: "fa-file-lines" };
     const labelMap = {
-        image: "Image — OCR extracted",
+        image: "Image",
         pdf:   "PDF — text extracted",
         code:  "Code file — analyzed",
         text:  "Text file — read"
@@ -356,6 +356,10 @@ function addFileBubbles() {
         wrap.className = "msg file-msg user";
 
         if (cat === "image") {
+            const modeLabel = item.imageMode === "photo"
+                ? "Image — AI Vision analyzed"
+                : "Image — OCR extracted";
+
             // Show the actual image thumbnail (local blob — instant, no wait)
             const blobUrl = URL.createObjectURL(item.file);
             wrap.innerHTML = `
@@ -363,7 +367,7 @@ function addFileBubbles() {
                     <img src="${blobUrl}" class="file-msg-thumb" alt="${item.file.name}">
                     <div class="file-msg-info">
                         <div class="file-msg-name">${item.file.name}</div>
-                        <div class="file-msg-sub">${labelMap[cat]}</div>
+                        <div class="file-msg-sub">${modeLabel}</div>
                     </div>
                 </div>`;
 
@@ -809,6 +813,21 @@ function renderFileChips() {
         const cat  = getFileCategory(item.file.type, item.file.name);
         const chip = document.createElement("div");
         chip.className = "file-chip";
+
+        // ── Image files get a Document/Photo mode toggle ──
+        //    Document → OCR (Tesseract) reads text out of screenshots/scans
+        //    Photo    → Pollinations Vision "looks" at objects/scenes
+        //    User decides explicitly — no guessing, no false negatives.
+        const imageToggle = cat === "image" ? `
+            <div class="file-chip-mode-toggle" data-idx="${idx}">
+                <button type="button" class="chip-mode-btn ${item.imageMode === "document" ? "active" : ""}" data-mode="document">
+                    <i class="fa-solid fa-file-lines"></i> Doc
+                </button>
+                <button type="button" class="chip-mode-btn ${item.imageMode === "photo" ? "active" : ""}" data-mode="photo">
+                    <i class="fa-solid fa-image"></i> Photo
+                </button>
+            </div>` : "";
+
         chip.innerHTML = `
             <div class="file-chip-icon ${CHIP_CLASS[cat] || "txt"}">
                 <i class="fa-solid ${CHIP_ICON[cat] || "fa-file"}"></i>
@@ -816,11 +835,25 @@ function renderFileChips() {
             <div class="file-chip-info">
                 <span class="file-chip-name">${item.file.name}</span>
                 <span class="file-chip-status" id="chipSt_${idx}">${CHIP_LABEL[cat]}</span>
+                ${imageToggle}
             </div>
             <button class="file-chip-remove" data-idx="${idx}" title="Remove">
                 <i class="fa-solid fa-xmark"></i>
             </button>`;
         multiFileList.appendChild(chip);
+    });
+
+    // Wire up mode toggle clicks
+    multiFileList.querySelectorAll(".chip-mode-btn").forEach(btn => {
+        btn.addEventListener("click", e => {
+            e.stopPropagation();
+            const idx  = parseInt(btn.closest(".file-chip-mode-toggle").dataset.idx);
+            const mode = btn.dataset.mode;
+            if (selectedFiles[idx]) {
+                selectedFiles[idx].imageMode = mode;
+                renderFileChips();
+            }
+        });
     });
 
     multiFileList.querySelectorAll(".file-chip-remove").forEach(btn => {
@@ -863,7 +896,11 @@ fileInput.addEventListener("change", e => {
 
     const existing = new Set(selectedFiles.map(i => i.file.name));
     const added    = files.filter(f => !existing.has(f.name));
-    added.forEach(f => selectedFiles.push({ file: f, status: "" }));
+    added.forEach(f => selectedFiles.push({
+        file: f,
+        status: "",
+        imageMode: "document" // default — user can switch to "photo" via chip toggle
+    }));
 
     if (added.length) {
         renderFileChips();
@@ -936,7 +973,7 @@ async function processAndSendFiles() {
     let combined = "";
 
     for (let i = 0; i < total; i++) {
-        const { file } = selectedFiles[i];
+        const { file, imageMode } = selectedFiles[i];
         const cat = getFileCategory(file.type, file.name);
         const ext = getFileExtension(file.name);
 
@@ -945,7 +982,20 @@ async function processAndSendFiles() {
 
         let text = "";
         try {
-            if      (cat === "image") { setChipStatus(i, "Running OCR...",   "processing"); text = await extractTextFromImage(file, i, total); }
+            if (cat === "image") {
+                if (imageMode === "photo") {
+                    // ── Photo/Object mode → Pollinations Vision ──
+                    //    User explicitly said this is a real photo, not a
+                    //    document — send it to a vision model that can
+                    //    actually see what's in it.
+                    setChipStatus(i, "AI looking at image...", "processing");
+                    text = await describeImageWithPollinations(file);
+                } else {
+                    // ── Document mode (default) → OCR ──
+                    setChipStatus(i, "Running OCR...", "processing");
+                    text = await extractTextFromImage(file, i, total);
+                }
+            }
             else if (cat === "pdf")   { setChipStatus(i, "Extracting PDF...", "processing"); text = await extractTextFromPDF(file); }
             else                      { setChipStatus(i, "Reading file...",   "processing"); text = await readTextFile(file); }
             setChipStatus(i, "✅ Done", "done");
@@ -977,10 +1027,73 @@ async function processAndSendFiles() {
     await callAPI();
 }
 
+// ── Pollinations Vision — free, no API key, describes photos/objects ──
+//    Used only when the user explicitly marks an image as "Photo" (not
+//    "Document") via the chip toggle. Returns plain description text that
+//    slots into the same `text` variable OCR normally fills, so the rest
+//    of the pipeline (combining into the AI context) doesn't need to care
+//    which path produced it.
+async function describeImageWithPollinations(file) {
+    const base64 = await fileToResizedBase64(file, 1024, 0.82);
+
+    const payload = {
+        model: "openai",
+        messages: [{
+            role: "user",
+            content: [
+                { type: "text", text: "Describe exactly what you see in this image — objects, people, animals, scene, colors, mood. Be specific and concise." },
+                { type: "image_url", image_url: { url: base64 } }
+            ]
+        }],
+        max_tokens: 400
+    };
+
+    const res = await fetch("https://text.pollinations.ai/openai", {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify(payload)
+    });
+
+    if (!res.ok) throw new Error(`Pollinations Vision failed (${res.status})`);
+
+    const data = await res.json();
+    const description = data?.choices?.[0]?.message?.content?.trim();
+
+    if (!description) throw new Error("Pollinations Vision returned empty response");
+    return description;
+}
+
+// ── Resize + compress an image File to a base64 data URL ──
+//    Keeps vision payloads small (phone photos can be 5-10MB raw).
+function fileToResizedBase64(file, maxDim = 1024, quality = 0.82) {
+    return new Promise((resolve, reject) => {
+        const objectUrl = URL.createObjectURL(file);
+        const img = new Image();
+
+        img.onload = () => {
+            let w = img.naturalWidth, h = img.naturalHeight;
+            if (w > maxDim || h > maxDim) {
+                const scale = maxDim / Math.max(w, h);
+                w = Math.floor(w * scale);
+                h = Math.floor(h * scale);
+            }
+            const canvas = document.createElement("canvas");
+            canvas.width = w; canvas.height = h;
+            canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+            URL.revokeObjectURL(objectUrl);
+            resolve(canvas.toDataURL("image/jpeg", quality));
+        };
+        img.onerror = () => {
+            URL.revokeObjectURL(objectUrl);
+            reject(new Error("Failed to load image for vision analysis"));
+        };
+        img.src = objectUrl;
+    });
+}
+
 // ------------------------------------------
-// 21. ✅ RESTORED: preprocessImage (from old version)
+// 21. preprocessImage + extractTextFromImage — OCR pipeline (Document mode)
 //     File → ObjectURL → Canvas → Grayscale+Contrast boost → Tesseract
-//     Much better OCR accuracy than passing raw file directly
 // ------------------------------------------
 async function preprocessImage(file) {
     return new Promise((resolve, reject) => {

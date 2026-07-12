@@ -979,6 +979,41 @@ body {
 
 .file-chip-remove:hover { color: var(--accent-red); background: rgba(244,63,94,0.1); }
 
+/* ---- Document/Photo mode toggle (image chips only) ---- */
+.file-chip-mode-toggle {
+    display: flex;
+    gap: 4px;
+    margin-top: 6px;
+}
+
+.chip-mode-btn {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 9px;
+    font-size: 10.5px;
+    font-weight: 600;
+    border-radius: 20px;
+    border: 1px solid var(--glass-border-h);
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: var(--transition);
+}
+
+.chip-mode-btn i { font-size: 9px; }
+
+.chip-mode-btn:hover {
+    color: var(--text-main);
+    border-color: var(--primary);
+}
+
+.chip-mode-btn.active {
+    background: var(--primary-dim);
+    border-color: var(--primary);
+    color: var(--primary);
+}
+
 /* OCR Progress Bar */
 .ocr-progress-bar {
     height: 3px;
