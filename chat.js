@@ -1034,47 +1034,33 @@ async function processAndSendFiles() {
 }
 
 // ── Pollinations Vision — free, no API key, describes photos/objects ──
-//    Used only when the user explicitly marks an image as "Photo" (not
-//    "Document") via the chip toggle. Returns plain description text that
-//    slots into the same `text` variable OCR normally fills, so the rest
-//    of the pipeline (combining into the AI context) doesn't need to care
-//    which path produced it.
+//    Routed through /api/vision (our own backend) rather than calling
+//    text.pollinations.ai directly from the browser — direct browser
+//    calls were failing with "Failed to fetch" (CORS), so the request
+//    goes server-to-server instead, same pattern as /api/ask.js.
 async function describeImageWithPollinations(file) {
     const base64 = await fileToResizedBase64(file, 1024, 0.82);
 
-    const payload = {
-        model: "openai",
-        messages: [{
-            role: "user",
-            content: [
-                { type: "text", text: "Describe exactly what you see in this image — objects, people, animals, scene, colors, mood. Be specific and concise." },
-                { type: "image_url", image_url: { url: base64 } }
-            ]
-        }],
-        max_tokens: 400
-    };
-
-    const res = await fetch("https://text.pollinations.ai/openai", {
+    const res = await fetch("/api/vision", {
         method:  "POST",
         headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify(payload)
+        body:    JSON.stringify({ imageBase64: base64 })
     });
 
-    if (res.status === 429) {
-        throw new Error("Rate limited — Pollinations allows 1 image request per ~15s on the free tier. Wait a moment and try again.");
+    let data;
+    try {
+        data = await res.json();
+    } catch {
+        throw new Error(`Vision backend returned invalid response (${res.status})`);
     }
+
     if (!res.ok) {
-        const errText = await res.text().catch(() => "");
-        throw new Error(`Pollinations Vision failed (${res.status}) ${errText.slice(0, 150)}`);
+        throw new Error(data?.error || `Vision request failed (${res.status})`);
     }
 
-    const data = await res.json();
-    console.log("Pollinations raw response:", JSON.stringify(data).slice(0, 500));
-
-    const description = data?.choices?.[0]?.message?.content?.trim();
-
+    const description = data?.description?.trim();
     if (!description) {
-        throw new Error(`Pollinations Vision returned empty content. Raw: ${JSON.stringify(data).slice(0, 200)}`);
+        throw new Error("Vision backend returned empty description");
     }
 
     // ── Reject non-answers that still come back as 200 OK ──
@@ -1086,7 +1072,7 @@ async function describeImageWithPollinations(file) {
         /\bi don'?t have (the )?(ability|permission|capability)\b/i.test(description);
 
     if (looksLikeRefusal) {
-        throw new Error(`Pollinations model refused/couldn't see the image. It said: "${description.slice(0, 150)}"`);
+        throw new Error(`Vision model refused/couldn't see the image. It said: "${description.slice(0, 150)}"`);
     }
 
     return description;
