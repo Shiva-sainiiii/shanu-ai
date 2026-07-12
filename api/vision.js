@@ -30,8 +30,10 @@ export default async function handler(req, res) {
             return res.status(400).json({ error: "No image provided" });
         }
 
+        console.log("Vision request — image size:", imageBase64.length, "prefix:", imageBase64.slice(0, 40));
+
         const payload = {
-            model: "openai",
+            model: "openai-large", // docs: "more powerful for complex images"
             messages: [{
                 role: "user",
                 content: [
@@ -67,6 +69,8 @@ export default async function handler(req, res) {
         }
 
         const data = await response.json();
+        console.log("Pollinations Vision raw response:", JSON.stringify(data).slice(0, 800));
+
         const description = data?.choices?.[0]?.message?.content?.trim();
 
         if (!description) {
