@@ -299,4 +299,4 @@ Technical tasks get the same energy: "Code tera solid hai — ab OPTIMIZE karo. 
     };
 
     return moods[mood] || moods["normal"];
-}
+                                           }
