@@ -1,5 +1,0 @@
-requests
-beautifulsoup4
-duckgo_search
-lxml
-python-dateutil
