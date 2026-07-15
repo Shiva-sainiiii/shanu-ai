@@ -1,6 +1,6 @@
 // ==========================================
 // Shanu AI — Serverless API Handler v3.1
-// Added: Web Search Tool + Python Scraper Call
+// Added: Web Search Tool + JavaScript Browse Handler
 // ==========================================
 
 export default async function handler(req, res) {
@@ -66,45 +66,67 @@ export default async function handler(req, res) {
         let message = data?.choices?.[0]?.message;
 
         // 2nd Call: Agar AI ne search maanga to
-        if (message.tool_calls) {
+        if (message?.tool_calls) {
             const toolCall = message.tool_calls[0];
             const query = JSON.parse(toolCall.function.arguments).query;
 
-            // ✅ FIXED: Changed from browse.py to browse (serverless endpoint)
-            const browseRes = await fetch(`https://shanu-ai.vercel.app/api/browse`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ query })
-            });
-            const browseData = await browseRes.json();
+            try {
+                // ✅ FIXED: Added error handling for browse endpoint
+                const browseRes = await fetch(`https://shanu-ai.vercel.app/api/browse`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ query }),
+                    timeout: 8000
+                });
 
-            // Search result wapas AI ko do taaki wo summary banae
-            const messages2 = [
-                { role: "system", content: systemPrompt },
-                ...messages,
-                message,
-                {
-                    role: "tool",
-                    tool_call_id: toolCall.id,
-                    content: JSON.stringify(browseData)
+                let browseData;
+                const responseText = await browseRes.text();
+                
+                try {
+                    browseData = JSON.parse(responseText);
+                } catch (e) {
+                    console.error("Browse endpoint returned non-JSON:", responseText.slice(0, 100));
+                    browseData = {
+                        query,
+                        results: [{
+                            title: "Search Temporarily Unavailable",
+                            snippet: "Web search service is being redeployed. Please try again in a moment.",
+                            source: "Shanu AI"
+                        }]
+                    };
                 }
-            ];
 
-            response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-                method: "POST",
-                headers: {
-                    "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
-                    "Content-Type": "application/json"
-                },
-                body: JSON.stringify({
-                    model: "nvidia/nemotron-3-nano-30b-a3b:free",
-                    messages: messages2,
-                    temperature: 0.82,
-                    max_tokens: 1200
-                })
-            });
-            data = await response.json();
-            message = data?.choices?.[0]?.message;
+                // Search result wapas AI ko do taaki wo summary banae
+                const messages2 = [
+                    { role: "system", content: systemPrompt },
+                    ...messages,
+                    message,
+                    {
+                        role: "tool",
+                        tool_call_id: toolCall.id,
+                        content: JSON.stringify(browseData)
+                    }
+                ];
+
+                response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+                    method: "POST",
+                    headers: {
+                        "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({
+                        model: "nvidia/nemotron-3-nano-30b-a3b:free",
+                        messages: messages2,
+                        temperature: 0.82,
+                        max_tokens: 1200
+                    })
+                });
+                data = await response.json();
+                message = data?.choices?.[0]?.message;
+            } catch (browseErr) {
+                console.error("Browse service error:", browseErr);
+                // Continue with AI response without search data
+            }
         }
 
         if (!response.ok) {
