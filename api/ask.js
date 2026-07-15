@@ -1,14 +1,10 @@
 // ==========================================
-// Shanu AI — Serverless API Handler v3
-// File: /api/ask.js  (Vercel Serverless Function)
-// Developer: Shiva Saini
-// Upgrades: Action tags system, code analysis prompts, larger context
+// Shanu AI — Serverless API Handler v3.1
+// Added: Web Search Tool + Python Scraper Call
 // ==========================================
 
 export default async function handler(req, res) {
-
-    // ── CORS ──────────────────────────────────────────────────
-    res.setHeader("Access-Control-Allow-Origin",  "*");
+    res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
     res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 
@@ -16,7 +12,6 @@ export default async function handler(req, res) {
     if (req.method !== "POST")
         return res.status(405).json({ reply: "Method not allowed" });
 
-    // ── API Key ───────────────────────────────────────────────
     if (!process.env.OPENROUTER_API_KEY)
         return res.status(500).json({ reply: "OpenRouter API key missing 🔑" });
 
@@ -29,37 +24,95 @@ export default async function handler(req, res) {
 
         const systemPrompt = getMoodPrompt(mood);
 
-        // ── OpenRouter API Call ───────────────────────────────
-        const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        // ── TOOL DEFINITION ───────────────────────────────────
+        const tools = [{
+            type: "function",
+            function: {
+                name: "web_search",
+                description: "Use this when user asks about current news, price, score, date, or anything that needs latest info from internet. Current year is 2026.",
+                parameters: {
+                    type: "object",
+                    properties: {
+                        query: { type: "string", description: "The search query in English" }
+                    },
+                    required: ["query"]
+                }
+            }
+        }];
+
+        // 1st Call: AI se pucho jawab de ya search kare
+        let response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
             method: "POST",
             headers: {
                 "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
-                "Content-Type":  "application/json",
-                "HTTP-Referer":  "https://shanu-ai.vercel.app",
-                "X-Title":       "Shanu AI"
+                "Content-Type": "application/json",
+                "HTTP-Referer": "https://shanu-ai.vercel.app",
+                "X-Title": "Shanu AI"
             },
             body: JSON.stringify({
-                model:       "nvidia/nemotron-3-nano-30b-a3b:free",
+                model: "nvidia/nemotron-3-nano-30b-a3b:free",
                 messages: [
                     { role: "system", content: systemPrompt },
                     ...messages
                 ],
+                tools: tools,
+                tool_choice: "auto",
                 temperature: 0.82,
-                max_tokens:  1200,   // Increased for action tags (PPT JSON can be large)
-                top_p:       0.95
+                max_tokens: 1200
             })
         });
 
-        const data = await response.json();
+        let data = await response.json();
+        let message = data?.choices?.[0]?.message;
+
+        // 2nd Call: Agar AI ne search maanga to
+        if (message.tool_calls) {
+            const toolCall = message.tool_calls[0];
+            const query = JSON.parse(toolCall.function.arguments).query;
+
+            // Python scraper ko call karo
+            const browseRes = await fetch(`https://shanu-ai.vercel.app/api/browse.py`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ query })
+            });
+            const browseData = await browseRes.json();
+
+            // Search result wapas AI ko do taaki wo summary banae
+            const messages2 = [
+                { role: "system", content: systemPrompt },
+                ...messages,
+                message,
+                {
+                    role: "tool",
+                    tool_call_id: toolCall.id,
+                    content: JSON.stringify(browseData)
+                }
+            ];
+
+            response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+                method: "POST",
+                headers: {
+                    "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                    model: "nvidia/nemotron-3-nano-30b-a3b:free",
+                    messages: messages2,
+                    temperature: 0.82,
+                    max_tokens: 1200
+                })
+            });
+            data = await response.json();
+            message = data?.choices?.[0]?.message;
+        }
 
         if (!response.ok) {
             console.error("OpenRouter Error:", data);
             return res.status(500).json({ reply: "AI ne jawab dene se mana kar diya 😅 Try again!" });
         }
 
-        const reply = data?.choices?.[0]?.message?.content?.trim()
-            || "Hmm... samajh nahi aaya 🤔";
-
+        const reply = message?.content?.trim() || "Hmm... samajh nahi aaya 🤔";
         return res.status(200).json({ reply });
 
     } catch (err) {
@@ -69,13 +122,17 @@ export default async function handler(req, res) {
 }
 
 // ==========================================
-// Mood-based System Prompts (v3)
+// Mood-based System Prompts (v3.1)
 // ==========================================
 function getMoodPrompt(mood) {
 
     // ── Base rules shared across all moods ──────────────────
     const baseRules = `
-You are Shanu AI, created by Shiva Saini. Current Year: 2026.
+You are Shanu AI, created by Shiva Saini. Current Year: 2026. Today is May 4, 2026.
+
+━━━ NEW RULE: WEB SEARCH ━━━
+- If user asks about "today, latest, price, news, score, trending, current, 2026" then MUST call web_search tool first.
+- After getting search results, answer using that info and add "Source: [link]" at the end.
 
 ━━━ CORE IDENTITY ━━━
 - Speak in natural Hinglish (Hindi + English mix). Example: "Yaar, that's actually solid logic!"
@@ -104,7 +161,7 @@ Use a MAXIMUM of ONE tag per response.
   [/PDF]
 
 ▸ User asks: "make a PPT / presentation / slides"
-  → [PPT]{"title":"Presentation Title","subtitle":"Optional subtitle","slides":[{"title":"Slide 1 Title","bullets":["First point here","Second point","Third point"]},{"title":"Slide 2","bullets":["Another point","More details here"]}]}[/PPT]
+  → [PPT]{"title":"Presentation Title","subtitle":"Optional subtitle","slides":[{"title":"Slide 1 Title","bullets":["First point here","Second point","Third point"]},{"title":"Slide 2","bullets":[...]}]}[/PPT]
   JSON RULES: Always valid JSON. "slides" is an array. Each slide has "title" and "bullets" (array of strings).
   Aim for 5-8 slides with 3-4 bullets each.
 
@@ -140,7 +197,7 @@ User: "Make me a PDF report on machine learning"
 You: "Sure yaar! Ek solid ML report bana raha hoon 📄\n[PDF]Machine Learning — Overview\n\nINTRODUCTION:\nMachine learning is...[/PDF]"
 
 User: "Show me a bar chart of monthly sales"
-You: "Yeh lo data visualization! 📊\n[CHART]{\"type\":\"bar\",\"title\":\"Monthly Sales\",\"labels\":[\"Jan\",\"Feb\",\"Mar\"],\"datasets\":[{\"label\":\"Sales (₹)\",\"data\":[45000,62000,51000]}]}[/CHART]"
+You: "Yeh lo data visualization! 📊\n[CHART]{"type":"bar","title":"Monthly Sales","labels":["Jan","Feb","Mar"],"datasets":[{"label":"Sales (₹)","data":[45000,62000,51000]}]}[/CHART]"
 
 User: "Build me a landing page"
 You: "Ek premium landing page bana raha hoon ✨\n[PREVIEW]<!DOCTYPE html>...</html>[/PREVIEW]"
