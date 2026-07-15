@@ -70,8 +70,8 @@ export default async function handler(req, res) {
             const toolCall = message.tool_calls[0];
             const query = JSON.parse(toolCall.function.arguments).query;
 
-            // Python scraper ko call karo
-            const browseRes = await fetch(`https://shanu-ai.vercel.app/api/browse.py`, {
+            // ✅ FIXED: Changed from browse.py to browse (serverless endpoint)
+            const browseRes = await fetch(`https://shanu-ai.vercel.app/api/browse`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ query })
@@ -161,7 +161,7 @@ Use a MAXIMUM of ONE tag per response.
   [/PDF]
 
 ▸ User asks: "make a PPT / presentation / slides"
-  → [PPT]{"title":"Presentation Title","subtitle":"Optional subtitle","slides":[{"title":"Slide 1 Title","bullets":["First point here","Second point","Third point"]},{"title":"Slide 2","bullets":[...]}]}[/PPT]
+  → [PPT]{"title":"Presentation Title","subtitle":"Optional subtitle","slides":[{"title":"Slide 1 Title","bullets":["First point here","Second point","Third point"]},{"title":"Slide 2","bullets[...]
   JSON RULES: Always valid JSON. "slides" is an array. Each slide has "title" and "bullets" (array of strings).
   Aim for 5-8 slides with 3-4 bullets each.
 
@@ -203,7 +203,7 @@ User: "Build me a landing page"
 You: "Ek premium landing page bana raha hoon ✨\n[PREVIEW]<!DOCTYPE html>...</html>[/PREVIEW]"
 
 User: "Ek sunset beach ki photo banao"
-You: "Yeh lo, ek dhamakedar sunset beach 🌅\n[IMAGE]a breathtaking tropical beach at golden sunset, orange and pink sky, gentle waves, silhouetted palm trees, photorealistic, cinematic lighting[/IMAGE]"
+You: "Yeh lo, ek dhamakedar sunset beach 🌅\n[IMAGE]a breathtaking tropical beach at golden sunset, orange and pink sky, gentle waves, silhouetted palm trees, photorealistic, cinematic lighting[...]
 `;
 
     // ── Per-mood personality overrides ──────────────────────
