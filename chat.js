@@ -816,7 +816,7 @@ function renderFileChips() {
 
         // ── Image files get a Document/Photo mode toggle ──
         //    Document → OCR (Tesseract) reads text out of screenshots/scans
-        //    Photo    → Pollinations Vision "looks" at objects/scenes
+        //    Photo    → Gemini Vision "looks" at objects/scenes
         //    User decides explicitly — no guessing, no false negatives.
         const imageToggle = cat === "image" ? `
             <div class="file-chip-mode-toggle" data-idx="${idx}">
@@ -984,12 +984,12 @@ async function processAndSendFiles() {
         try {
             if (cat === "image") {
                 if (imageMode === "photo") {
-                    // ── Photo/Object mode → Pollinations Vision ──
+                    // ── Photo/Object mode → Gemini Vision ──
                     //    User explicitly said this is a real photo, not a
                     //    document — send it to a vision model that can
                     //    actually see what's in it.
                     setChipStatus(i, "AI looking at image...", "processing");
-                    text = await describeImageWithPollinations(file);
+                    text = await describeImageWithGemini(file);
                 } else {
                     // ── Document mode (default) → OCR ──
                     setChipStatus(i, "Running OCR...", "processing");
@@ -1033,12 +1033,12 @@ async function processAndSendFiles() {
     await callAPI();
 }
 
-// ── Pollinations Vision — free, no API key, describes photos/objects ──
-//    Routed through /api/vision (our own backend) rather than calling
-//    text.pollinations.ai directly from the browser — direct browser
-//    calls were failing with "Failed to fetch" (CORS), so the request
-//    goes server-to-server instead, same pattern as /api/ask.js.
-async function describeImageWithPollinations(file) {
+// ── Gemini Vision — describes photos/objects (Google AI Studio key) ──
+//    Routed through /api/vision (our own backend) so the Google API key
+//    never touches the browser — same pattern as /api/ask.js uses for
+//    the OpenRouter key. Image GENERATION is untouched and still runs
+//    on Pollinations (see loadPollinationsImage above).
+async function describeImageWithGemini(file) {
     const base64 = await fileToResizedBase64(file, 1024, 0.82);
 
     const res = await fetch("/api/vision", {
