@@ -15,8 +15,21 @@
 //          /api/ask.js uses for the OpenRouter key.
 // ==========================================
 
-const GEMINI_URL =
-    "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent";
+// NOTE ON THE 503 BUG:
+// "gemini-flash-latest" is an ALIAS. Google routes a huge share of
+// free-tier traffic through aliases, so they get overloaded and return
+// 503 ("model overloaded") way more often than a pinned version does.
+// Fix: try a pinned stable version first, and if THAT 503s too, fall
+// back to other models automatically instead of failing the request.
+const GEMINI_MODELS = [
+    "gemini-2.0-flash",       // pinned stable — primary
+    "gemini-flash-latest",    // alias — fallback #1
+    "gemini-2.0-flash-lite"   // lighter/less contended — fallback #2
+];
+
+function geminiUrl(model) {
+    return `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+}
 
 export default async function handler(req, res) {
 
@@ -68,23 +81,42 @@ export default async function handler(req, res) {
             }]
         };
 
-        const response = await fetch(`${GEMINI_URL}?key=${process.env.GOOGLE_API_KEY}`, {
-            method:  "POST",
-            headers: { "Content-Type": "application/json" },
-            body:    JSON.stringify(payload)
-        });
+        // ── Try each model in order. On 503 (overloaded), move to the
+        //    next one in the list instead of failing immediately. ──
+        let response, lastStatus, lastErrText = "";
 
-        if (response.status === 429) {
+        for (const model of GEMINI_MODELS) {
+            response = await fetch(`${geminiUrl(model)}?key=${process.env.GOOGLE_API_KEY}`, {
+                method:  "POST",
+                headers: { "Content-Type": "application/json" },
+                body:    JSON.stringify(payload)
+            });
+
+            if (response.ok) {
+                console.log(`Gemini Vision succeeded using model: ${model}`);
+                break;
+            }
+
+            lastStatus = response.status;
+            lastErrText = await response.text().catch(() => "");
+            console.error(`Gemini Vision (${model}) error:`, lastStatus, lastErrText.slice(0, 300));
+
+            // 429 = rate limited, no point trying other models, same key/quota
+            if (lastStatus === 429) break;
+
+            // 503 = overloaded → try next model in the list
+            // Any other error (400, 404 etc) → also try next model, cheap to attempt
+        }
+
+        if (lastStatus === 429) {
             return res.status(429).json({
                 error: "Rate limited — Gemini's free tier allows limited requests per minute. Wait a moment and try again."
             });
         }
 
         if (!response.ok) {
-            const errText = await response.text().catch(() => "");
-            console.error("Gemini Vision error:", response.status, errText.slice(0, 300));
             return res.status(502).json({
-                error: `Gemini Vision failed (${response.status})`
+                error: `Gemini Vision failed on all models (last: ${lastStatus}). Try again in a moment — Google's free tier gets overloaded sometimes.`
             });
         }
 
