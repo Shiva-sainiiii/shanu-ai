@@ -51,7 +51,7 @@ Whether you want a witty roast partner, a sarcastic companion, or a supportive f
 |---|---|
 | 🎭 **Mood Selector** | 8+ unique moods (Girlfriend, Boyfriend, Roast, Sarcastic, and more) that reshape the AI's entire personality |
 | 🎨 **Text-to-Image Generation** | Just ask — "banao ek sunset ki photo" — and Shanu generates a full AI image inline, powered by Pollinations.ai (free, no API key) |
-| 👁️ **Dual-Mode Image Understanding** | Upload an image and choose **Document** (OCR text extraction via Tesseract) or **Photo** (AI Vision via Pollinations describes objects/scenes) — you decide, no guessing |
+| 👁️ **Dual-Mode Image Understanding** | Upload an image and choose **Document** (OCR text extraction via Tesseract) or **Photo** (AI Vision via Google Gemini describes objects/scenes) — you decide, no guessing |
 | ☁️ **Cloudinary Media Hosting** | User-uploaded images and AI-generated images are permanently hosted on Cloudinary — nothing expires or breaks |
 | 💎 **Glassmorphism UI** | Modern frosted-glass aesthetic with fluid blob animations and a polished dark theme |
 | 💾 **Persistent Memory (Firebase + LocalStorage)** | Firestore stores chat history in the cloud, with a localStorage write-through cache for instant loads and offline-safe fallback |
@@ -70,6 +70,7 @@ Whether you want a witty roast partner, a sarcastic companion, or a supportive f
 | **Database** | Firebase Firestore (Real-time NoSQL) + LocalStorage (instant-load cache) |
 | **AI Engine** | OpenRouter API — Nvidia Nemotron / Open-source LLMs |
 | **Image Generation** | Pollinations.ai (free text-to-image API, no key required) |
+| **Image Vision** | Google Gemini (`gemini-flash-latest`) via Google AI Studio API key |
 | **Media Hosting** | Cloudinary (permanent hosting for uploaded & AI-generated images) |
 | **Deployment** | Vercel (Serverless Functions) |
 | **Icons** | Font Awesome 6.4.0 |
@@ -153,6 +154,7 @@ Set the following environment variables in your Vercel project dashboard under *
 | Variable | Description |
 |---|---|
 | `OPENROUTER_API_KEY` | Your API key from [OpenRouter](https://openrouter.ai/) |
+| `GOOGLE_API_KEY` | Your API key from [Google AI Studio](https://aistudio.google.com/apikey) — powers image Vision (Photo mode) |
 | `CLOUDINARY_CLOUD_NAME` | Your cloud name from [Cloudinary Console](https://console.cloudinary.com/) |
 | `CLOUDINARY_UPLOAD_PRESET` | An **unsigned** upload preset (Settings → Upload → Add upload preset → Signing Mode: Unsigned) |
 
