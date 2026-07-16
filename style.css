@@ -378,6 +378,198 @@ body {
 }
 
 /* Status Indicator */
+/* ---- Plus Menu (Add to chat) — bottom sheet like Claude's + menu ---- */
+.plus-menu-wrapper { position: relative; }
+
+.plus-btn i { transition: transform 0.2s ease; }
+.plus-btn.open i { transform: rotate(45deg); }
+
+.plus-sheet-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.55);
+    backdrop-filter: blur(2px);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.25s ease;
+    z-index: 9998;
+}
+
+.plus-sheet-backdrop.show {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.plus-sheet {
+    position: fixed;
+    left: 0; right: 0; bottom: 0;
+    background: rgba(14, 18, 32, 0.98);
+    border: 1px solid var(--glass-border-h);
+    border-bottom: none;
+    border-radius: 26px 26px 0 0;
+    padding: 10px 18px calc(20px + env(safe-area-inset-bottom, 0px));
+    z-index: 9999;
+    box-shadow: var(--shadow-lg);
+    backdrop-filter: blur(24px);
+    transform: translateY(100%);
+    transition: transform 0.28s cubic-bezier(0.32, 0.72, 0, 1);
+    max-width: 520px;
+    margin: 0 auto;
+}
+
+.plus-sheet.show { transform: translateY(0); }
+
+.plus-sheet-handle {
+    width: 40px; height: 4px;
+    background: var(--glass-border-h);
+    border-radius: 4px;
+    margin: 6px auto 14px;
+}
+
+.plus-sheet-header {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--text-main);
+    margin-bottom: 18px;
+}
+
+.plus-sheet-close {
+    position: absolute;
+    right: 0;
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-size: 16px;
+    cursor: pointer;
+    padding: 4px 8px;
+}
+
+.plus-sheet-close:hover { color: var(--text-main); }
+
+.plus-sheet-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+    margin-bottom: 14px;
+}
+
+.plus-tile {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-md);
+    padding: 18px 8px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    cursor: pointer;
+    color: var(--text-main);
+    font-size: 13px;
+    font-weight: 600;
+    font-family: inherit;
+    transition: var(--transition);
+}
+
+.plus-tile:hover {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: var(--glass-border-h);
+}
+
+.plus-tile-icon {
+    width: 46px; height: 46px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.06);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    color: var(--text-main);
+}
+
+.plus-sheet-row {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-md);
+    padding: 14px 16px;
+    margin-bottom: 10px;
+    cursor: pointer;
+    color: var(--text-main);
+    font-family: inherit;
+    text-align: left;
+    transition: var(--transition);
+}
+
+.plus-sheet-row:hover { border-color: var(--glass-border-h); }
+
+.plus-row-icon {
+    width: 32px; height: 32px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.06);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    flex-shrink: 0;
+}
+
+.plus-row-label {
+    flex: 1;
+    font-size: 14.5px;
+    font-weight: 500;
+}
+
+.plus-toggle {
+    width: 44px; height: 26px;
+    border-radius: 20px;
+    background: rgba(255, 255, 255, 0.12);
+    position: relative;
+    flex-shrink: 0;
+    transition: background 0.2s ease;
+}
+
+.plus-toggle::after {
+    content: "";
+    position: absolute;
+    top: 3px; left: 3px;
+    width: 20px; height: 20px;
+    border-radius: 50%;
+    background: #fff;
+    transition: transform 0.2s ease;
+}
+
+.plus-toggle.on {
+    background: var(--primary);
+}
+
+.plus-toggle.on::after {
+    transform: translateX(18px);
+}
+
+@media (min-width: 640px) {
+    .plus-sheet {
+        left: auto;
+        bottom: 90px;
+        border-radius: var(--radius-md);
+        border-bottom: 1px solid var(--glass-border-h);
+        width: 360px;
+        transform: translateY(12px) scale(0.96);
+        opacity: 0;
+        transition: transform 0.2s ease, opacity 0.2s ease;
+    }
+    .plus-sheet.show {
+        transform: translateY(0) scale(1);
+        opacity: 1;
+    }
+}
+
 /* ---- Bloom Mode ---- */
 .bloom-toggle-btn.active {
     background: var(--primary-dim);
