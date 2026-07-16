@@ -350,19 +350,19 @@ function unlockUI() {
 //    4. Uses .msg-actions bar (matches style.css)
 //    5. parseActions=false for history load (no re-triggering old actions)
 // ------------------------------------------
-function addMessage(text, type = "bot", parseActions = true) {
+async function addMessage(text, type = "bot", parseActions = true) {
     hidePlaceholder();
     const div = document.createElement("div");
     div.className = `msg ${type}`;
 
     if (type === "bot") {
 
-        // ── Step 1: Parse action tags ONCE (BUG FIX: was called twice before) ──
+        // ── Step 1: Parse action tags ONCE ──
         let displayText = text;
         let indicator   = null;
 
         if (parseActions) {
-            const parsed = parseAndExecuteActions(text);
+            const parsed = await parseAndExecuteActions(text);
             displayText  = parsed.cleanText;
             indicator    = parsed.indicator;
         }
@@ -433,12 +433,46 @@ function addMessage(text, type = "bot", parseActions = true) {
         div.appendChild(actionBar);
         chatBox.appendChild(div);
 
-        // ── Step 5: Action indicator pill (e.g. "PDF downloaded") ──
+        // ── Step 5: Action result card — PDF/PPT get View+Download
+        //    buttons, Preview gets a Reopen button. These stay clickable
+        //    forever (not a one-time toast), because the blob URL / html
+        //    is captured in this closure, one per message. ──
         if (indicator) {
-            const pill = document.createElement("div");
-            pill.className = "action-result-pill";
-            pill.innerHTML = indicator;
-            chatBox.appendChild(pill);
+            const card = document.createElement("div");
+            card.className = "action-result-pill action-result-card";
+
+            if (indicator.type === "pdf" || indicator.type === "ppt") {
+                const isPdf = indicator.type === "pdf";
+                card.innerHTML = `
+                    <i class="fa-solid ${isPdf ? "fa-file-pdf" : "fa-file-powerpoint"}"></i>
+                    <span>${isPdf ? "PDF" : "Presentation"} ready — ${indicator.filename}</span>
+                    <div class="action-result-btns">
+                        <button class="action-result-btn view-btn"><i class="fa-solid fa-eye"></i> View</button>
+                        <button class="action-result-btn dl-btn"><i class="fa-solid fa-download"></i> Download</button>
+                    </div>`;
+                card.querySelector(".view-btn").addEventListener("click", () => {
+                    window.open(indicator.blobUrl, "_blank", "noopener");
+                });
+                card.querySelector(".dl-btn").addEventListener("click", () => {
+                    const a = document.createElement("a");
+                    a.href = indicator.blobUrl;
+                    a.download = indicator.filename;
+                    a.click();
+                    showToast(`${isPdf ? "📄" : "📊"} ${indicator.filename} downloaded!`);
+                });
+            } else if (indicator.type === "preview") {
+                card.innerHTML = `
+                    <i class="fa-solid fa-eye"></i>
+                    <span>Live preview generated</span>
+                    <div class="action-result-btns">
+                        <button class="action-result-btn view-btn"><i class="fa-solid fa-arrow-up-right-from-square"></i> Reopen</button>
+                    </div>`;
+                card.querySelector(".view-btn").addEventListener("click", () => {
+                    showLivePreview(indicator.html);
+                });
+            }
+
+            chatBox.appendChild(card);
         }
 
     } else {
@@ -512,27 +546,29 @@ function addFileBubbles() {
 
 // ------------------------------------------
 // 10. ✨ ACTION ENGINE — Tag Parser
-//     ✅ BUG FIXED: Called only ONCE now (was called twice in old new version)
-//     Tags: [PDF] [PPT] [CHART] [PREVIEW]
+//     Tags: [PDF] [PPT] [CHART] [PREVIEW] [IMAGE]
+//     Returns structured indicator data (not raw HTML) so addMessage()
+//     can build a re-openable card — View/Download stay clickable even
+//     after the message has scrolled past, instead of a one-time toast.
 // ------------------------------------------
-function parseAndExecuteActions(rawText) {
+async function parseAndExecuteActions(rawText) {
     let text      = rawText;
-    let indicator = null;
+    let indicator = null; // { type: "pdf"|"ppt"|"preview", ...data }
 
     // [PDF]...[/PDF]
     const pdfMatch = text.match(/\[PDF\]([\s\S]*?)\[\/PDF\]/i);
     if (pdfMatch) {
         text = text.replace(pdfMatch[0], "").trim();
-        generatePDF(pdfMatch[1].trim());
-        indicator = `<i class="fa-solid fa-file-pdf"></i> PDF generated & downloaded`;
+        const result = generatePDF(pdfMatch[1].trim());
+        if (result) indicator = { type: "pdf", ...result };
     }
 
     // [PPT]json[/PPT]
     const pptMatch = text.match(/\[PPT\]([\s\S]*?)\[\/PPT\]/i);
     if (pptMatch) {
         text = text.replace(pptMatch[0], "").trim();
-        generatePPT(pptMatch[1].trim());
-        indicator = `<i class="fa-solid fa-file-powerpoint"></i> Presentation downloaded`;
+        const result = await generatePPT(pptMatch[1].trim());
+        if (result) indicator = { type: "ppt", ...result };
     }
 
     // [CHART]json[/CHART]
@@ -547,9 +583,10 @@ function parseAndExecuteActions(rawText) {
     const previewMatch = text.match(/\[PREVIEW\]([\s\S]*?)\[\/PREVIEW\]/i);
     if (previewMatch) {
         text = text.replace(previewMatch[0], "").trim();
-        lastPreviewHTML = previewMatch[1].trim();
-        setTimeout(() => showLivePreview(lastPreviewHTML), 150);
-        indicator = `<i class="fa-solid fa-eye"></i> Live preview opened`;
+        const html = previewMatch[1].trim();
+        lastPreviewHTML = html;
+        setTimeout(() => showLivePreview(html), 150);
+        indicator = { type: "preview", html };
     }
 
     // [IMAGE]prompt[/IMAGE]
@@ -572,7 +609,7 @@ function parseAndExecuteActions(rawText) {
 function generatePDF(content) {
     try {
         const { jsPDF } = window.jspdf;
-        if (!jsPDF) { showToast("⚠️ jsPDF not loaded yet. Try again."); return; }
+        if (!jsPDF) { showToast("⚠️ jsPDF not loaded yet. Try again."); return null; }
 
         const doc    = new jsPDF({ unit: "mm", format: "a4" });
         const pageW  = doc.internal.pageSize.getWidth();
@@ -620,11 +657,15 @@ function generatePDF(content) {
             doc.text(`${i} / ${total}`, pageW / 2, 292, { align: "center" });
         }
 
-        doc.save("shanu-ai-output.pdf");
-        showToast("📄 PDF downloaded!");
+        // ── No auto-download. Return a blob URL so the chat can show a
+        //    View/Download card that the user controls, and can re-open
+        //    later — instead of a surprise download the user didn't ask for. ──
+        const blobUrl = doc.output("bloburl").toString();
+        return { blobUrl, filename: "shanu-ai-output.pdf" };
     } catch (e) {
         console.error("PDF Error:", e);
         showToast("⚠️ PDF generation failed.");
+        return null;
     }
 }
 
@@ -634,7 +675,7 @@ function generatePDF(content) {
 async function generatePPT(jsonStr) {
     try {
         if (typeof PptxGenJS === "undefined") {
-            showToast("⚠️ PptxGenJS not loaded yet. Try again."); return;
+            showToast("⚠️ PptxGenJS not loaded yet. Try again."); return null;
         }
 
         const clean = jsonStr.replace(/^```[a-z]*\n?/i, "").replace(/\n?```$/i, "").trim();
@@ -672,11 +713,16 @@ async function generatePPT(jsonStr) {
             }
         });
 
-        await pptx.writeFile({ fileName: "shanu-ai-presentation.pptx" });
-        showToast("📊 Presentation downloaded!");
+        // ── No auto-download. Get a blob and make our own URL so the
+        //    chat can show a Download card the user controls & can
+        //    return to later. ──
+        const blob    = await pptx.write("blob");
+        const blobUrl = URL.createObjectURL(blob);
+        return { blobUrl, filename: "shanu-ai-presentation.pptx" };
     } catch (e) {
         console.error("PPT Error:", e);
         showToast("⚠️ PPT failed. Try saying 'retry PPT'.");
+        return null;
     }
 }
 
@@ -1080,7 +1126,7 @@ async function callAPI() {
         const data = await res.json();
         typingEl.remove();
         const reply = data.reply || "Hmm... kuch samajh nahi aaya 🤔";
-        addMessage(reply, "bot", true);
+        await addMessage(reply, "bot", true);
         chatContext.push({ role: "assistant", content: reply });
         await saveMessageToDB("assistant", reply);
     } catch (err) {
@@ -1286,7 +1332,7 @@ async function processBloomDescribe() {
         return;
     }
     typingEl.remove();
-    addMessage(description, "bot", true);
+    await addMessage(description, "bot", true);
 
     chatContext.push({ role: "user", content: `[Bloom image attached]${question ? " Question: " + question : ""}` });
     chatContext.push({ role: "assistant", content: description });
