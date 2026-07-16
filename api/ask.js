@@ -5,6 +5,70 @@
 // Upgrades: Action tags system, code analysis prompts, larger context
 // ==========================================
 
+// ==========================================
+// Web Search — DuckDuckGo HTML scrape, no API key needed
+// ==========================================
+async function performWebSearch(query) {
+    try {
+        const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
+
+        // Hard timeout — DDG's scrape endpoint occasionally hangs or rate
+        // limits (403/202). Don't let a stuck search stall the whole chat.
+        const controller = new AbortController();
+        const timeoutId  = setTimeout(() => controller.abort(), 6000);
+
+        const res = await fetch(url, {
+            signal: controller.signal,
+            headers: {
+                // DuckDuckGo's HTML endpoint blocks requests with no/odd
+                // User-Agent — a normal browser UA avoids that.
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+            }
+        });
+        clearTimeout(timeoutId);
+
+        // 202/403 = DuckDuckGo rate-limiting this request — fail soft,
+        // the AI will just answer from general knowledge instead.
+        if (!res.ok) {
+            console.warn(`DDG search returned ${res.status} for query: ${query}`);
+            return [];
+        }
+
+        const html = await res.text();
+
+        // ── Lightweight regex scrape (no DOM parser available in this
+        //    serverless runtime) — pulls result titles, links, snippets
+        //    out of DuckDuckGo's HTML result markup. ──
+        const results = [];
+        const blockRe = /<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)<\/a>[\s\S]*?<a[^>]*class="result__snippet"[^>]*>(.*?)<\/a>/g;
+        let m;
+        while ((m = blockRe.exec(html)) !== null && results.length < 5) {
+            const stripTags = s => s.replace(/<[^>]+>/g, "").replace(/&#x27;/g, "'").replace(/&quot;/g, '"').replace(/&amp;/g, "&").trim();
+            let link = m[1];
+            // DDG wraps result links in a redirect — extract the real uddg= target
+            const uddgMatch = link.match(/uddg=([^&]+)/);
+            if (uddgMatch) link = decodeURIComponent(uddgMatch[1]);
+            results.push({
+                title:   stripTags(m[2]),
+                url:     link,
+                snippet: stripTags(m[3])
+            });
+        }
+        return results;
+    } catch (err) {
+        console.error("Web search error:", err);
+        return [];
+    }
+}
+
+function formatSearchContext(query, results) {
+    if (!results.length) {
+        return `[Web search for "${query}" returned no results — answer from general knowledge and mention you couldn't fetch live results.]`;
+    }
+    const lines = results.map((r, i) => `${i + 1}. ${r.title}\n   ${r.snippet}\n   Source: ${r.url}`).join("\n\n");
+    return `[Live web search results for "${query}" — use this to answer accurately with current info. Cite sources naturally, e.g. "according to X":\n\n${lines}]`;
+}
+
 export default async function handler(req, res) {
 
     // ── CORS ──────────────────────────────────────────────────
@@ -22,12 +86,31 @@ export default async function handler(req, res) {
 
     try {
         const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
-        const { messages, mood } = body || {};
+        const { messages, mood, webSearch } = body || {};
 
         if (!messages || !Array.isArray(messages))
             return res.status(400).json({ reply: "Messages array missing 🧐" });
 
         const systemPrompt = getMoodPrompt(mood);
+
+        // ── Web Search (optional, user-toggled) ──────────────────
+        //    Runs a live DuckDuckGo search on the latest user message
+        //    and injects the results as a system-level context block
+        //    right before the AI call. Fixes "outdated knowledge" —
+        //    e.g. wrong answers to "what's today's date" or current events.
+        let outgoingMessages = messages;
+        if (webSearch) {
+            const lastUserMsg = [...messages].reverse().find(m => m.role === "user");
+            if (lastUserMsg?.content) {
+                const results = await performWebSearch(lastUserMsg.content);
+                const searchContext = formatSearchContext(lastUserMsg.content, results);
+                outgoingMessages = [
+                    ...messages.slice(0, -1),
+                    { role: "system", content: searchContext },
+                    messages[messages.length - 1]
+                ];
+            }
+        }
 
         // ── OpenRouter API Call ───────────────────────────────
         const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
@@ -42,7 +125,7 @@ export default async function handler(req, res) {
                 model:       "nvidia/nemotron-3-nano-30b-a3b:free",
                 messages: [
                     { role: "system", content: systemPrompt },
-                    ...messages
+                    ...outgoingMessages
                 ],
                 temperature: 0.82,
                 max_tokens:  1200,   // Increased for action tags (PPT JSON can be large)
@@ -76,6 +159,13 @@ function getMoodPrompt(mood) {
     // ── Base rules shared across all moods ──────────────────
     const baseRules = `
 You are Shanu AI, created by Shiva Saini. Current Year: 2026.
+
+━━━ CURRENT DATE ━━━
+Today's date is ${new Date().toLocaleDateString("en-IN", { weekday: "long", year: "numeric", month: "long", day: "numeric", timeZone: "Asia/Kolkata" })}.
+If asked "what's today's date" or similar, answer directly and confidently with this date — do not say you don't know or guess an old date.
+
+━━━ WEB SEARCH CONTEXT ━━━
+If a message in the conversation starts with "[Live web search results for..." or "[Web search for...", that is REAL, CURRENT information fetched just now — treat it as ground truth, more reliable than your training data for anything time-sensitive (news, prices, scores, current events, "who is the current X"). Base your answer on it and mention sources naturally. If it says no results were found, say so honestly instead of guessing.
 
 ━━━ CORE IDENTITY ━━━
 - Speak in natural Hinglish (Hindi + English mix). Example: "Yaar, that's actually solid logic!"
