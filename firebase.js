@@ -81,6 +81,7 @@ function appendLocalMessage(role, content, meta = {}, seq = null) {
     const history = getLocalHistory();
     const entry = { role, content, timestamp: Date.now(), seq: seq ?? (history.length + 1) };
     if (meta.displayLabel) entry.displayLabel = meta.displayLabel;
+    if (meta.questionText) entry.questionText = meta.questionText;
     if (meta.fileThumbs && meta.fileThumbs.some(u => u)) entry.fileThumbs = meta.fileThumbs;
     history.push(entry);
     saveLocalHistory(history);
@@ -168,6 +169,9 @@ let localSeqCounter = 0;
  * @param {object} [meta] - optional extras:
  *   meta.displayLabel — shorter text to actually render in the chat bubble
  *                       on history replay (falls back to `content` if omitted)
+ *   meta.questionText — the user's typed question alongside a file upload,
+ *                       shown as its own bubble (matches the live send flow,
+ *                       where the file card and the question render separately)
  *   meta.fileThumbs   — array of Cloudinary URLs for attached images, so
  *                       thumbnails can be restored after a refresh
  */
@@ -191,6 +195,7 @@ export async function saveMessageToDB(role, content, meta = {}) {
             timestamp: serverTimestamp() // Server-side timestamp — no clock skew
         };
         if (meta.displayLabel) docData.displayLabel = meta.displayLabel;
+        if (meta.questionText) docData.questionText = meta.questionText;
         if (meta.fileThumbs && meta.fileThumbs.some(u => u)) docData.fileThumbs = meta.fileThumbs;
 
         await addDoc(collection(db, "chats"), docData);
@@ -231,15 +236,16 @@ export async function loadHistoryFromDB(limitCount = 30) {
 
         if (messages.length > 0) {
             // Firestore is source of truth when reachable — refresh local
-            // cache. Keep seq/displayLabel/fileThumbs — dropping them here
-            // previously meant every reload after this one lost the extra
-            // fields even though Firestore still had them.
+            // cache. Keep seq/displayLabel/questionText/fileThumbs —
+            // dropping them here previously meant every reload after this
+            // one lost the extra fields even though Firestore still had them.
             saveLocalHistory(messages.map(m => ({
                 role:         m.role,
                 content:      m.content,
                 timestamp:    Date.now(),
                 seq:          m.seq,
                 displayLabel: m.displayLabel,
+                questionText: m.questionText,
                 fileThumbs:   m.fileThumbs
             })));
             return messages;
