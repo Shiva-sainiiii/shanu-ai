@@ -6,116 +6,74 @@
 // ==========================================
 
 // ==========================================
-// Web Search — Wikipedia + DuckDuckGo Instant Answer APIs
+// Web Search — Tavily API
 //
-// NOTE: We previously scraped html.duckduckgo.com's HTML results page.
-// That is NOT an official API — DuckDuckGo actively rate-limits/blocks
-// automated requests, and Vercel's datacenter IPs get flagged fast, so
-// it silently failed in production even though local testing looked
-// promising. Switched to two real JSON APIs that don't require a key
-// and don't get IP-blocked:
-//   1. Wikipedia's search + summary API — great for general knowledge,
-//      "what is X", "who is X", historical/factual topics.
-//   2. DuckDuckGo's Instant Answer API (api.duckduckgo.com, NOT the
-//      HTML scrape) — good for quick facts, definitions, some entities.
-// Neither covers live breaking news/scores/prices well — that's an
-// inherent limit of free no-key sources, not a bug. We're honest about
-// that limit in the context we send the AI, instead of pretending.
+// Real search results (not Wikipedia-only) with a free tier: 1,000
+// credits/month, no credit card required. Set TAVILY_API_KEY in Vercel's
+// environment variables. Falls back gracefully with an honest message
+// if the key is missing or the request fails — never breaks the chat.
 // ==========================================
-async function fetchWithTimeout(url, ms = 5000) {
-    const controller = new AbortController();
-    const timeoutId  = setTimeout(() => controller.abort(), ms);
+async function performWebSearch(query) {
+    if (!process.env.TAVILY_API_KEY) {
+        console.warn("TAVILY_API_KEY not set — skipping web search.");
+        return [];
+    }
+
     try {
-        const res = await fetch(url, {
+        const controller = new AbortController();
+        const timeoutId  = setTimeout(() => controller.abort(), 8000);
+
+        const res = await fetch("https://api.tavily.com/search", {
+            method: "POST",
             signal: controller.signal,
-            headers: { "User-Agent": "ShanuAI/1.0 (https://shanu-ai.vercel.app)" }
+            headers: {
+                "Content-Type":  "application/json",
+                "Authorization": `Bearer ${process.env.TAVILY_API_KEY}`
+            },
+            body: JSON.stringify({
+                query,
+                search_depth:   "basic", // "advanced" costs more credits — basic is enough for chat context
+                max_results:    5,
+                include_answer: true     // Tavily's own synthesized quick answer, when available
+            })
         });
         clearTimeout(timeoutId);
-        return res;
-    } catch (err) {
-        clearTimeout(timeoutId);
-        return null;
-    }
-}
 
-async function searchWikipedia(query) {
-    try {
-        // Step 1: find the best-matching page title for the query
-        const searchUrl = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&format=json&srlimit=3&origin=*`;
-        const searchRes = await fetchWithTimeout(searchUrl);
-        if (!searchRes?.ok) return [];
-        const searchData = await searchRes.json();
-        const hits = searchData?.query?.search || [];
-        if (!hits.length) return [];
-
-        // Step 2: fetch a clean summary for the top hit(s)
-        const results = [];
-        for (const hit of hits.slice(0, 2)) {
-            const title = hit.title;
-            const sumUrl = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title.replace(/ /g, "_"))}`;
-            const sumRes = await fetchWithTimeout(sumUrl, 4000);
-            if (!sumRes?.ok) continue;
-            const sum = await sumRes.json();
-            if (sum?.extract) {
-                results.push({
-                    title:   sum.title || title,
-                    snippet: sum.extract,
-                    url:     sum.content_urls?.desktop?.page || `https://en.wikipedia.org/wiki/${encodeURIComponent(title)}`
-                });
-            }
+        if (!res.ok) {
+            console.warn(`Tavily search returned ${res.status} for query: ${query}`);
+            return [];
         }
-        return results;
-    } catch (err) {
-        console.error("Wikipedia search error:", err);
-        return [];
-    }
-}
 
-async function searchDuckDuckGoInstant(query) {
-    try {
-        const url = `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1&skip_disambig=1`;
-        const res = await fetchWithTimeout(url, 4000);
-        if (!res?.ok) return [];
         const data = await res.json();
+        const results = [];
 
-        const text = data?.AbstractText || data?.Answer || data?.Definition;
-        if (!text) return [];
+        // Tavily's own synthesized answer, if present, is the single
+        // most useful line — surface it first.
+        if (data.answer) {
+            results.push({ title: "Quick Answer", snippet: data.answer, url: "" });
+        }
 
-        return [{
-            title:   data.Heading || query,
-            snippet: text,
-            url:     data.AbstractURL || data.DefinitionURL || ""
-        }];
+        (data.results || []).forEach(r => {
+            results.push({
+                title:   r.title || "",
+                snippet: (r.content || "").slice(0, 500),
+                url:     r.url || ""
+            });
+        });
+
+        return results.slice(0, 6);
     } catch (err) {
-        console.error("DDG Instant Answer error:", err);
+        console.error("Tavily search error:", err);
         return [];
     }
-}
-
-async function performWebSearch(query) {
-    // Run both sources in parallel, merge — Wikipedia usually wins for
-    // depth, DDG Instant Answer sometimes has a sharper direct answer.
-    const [wiki, ddg] = await Promise.all([
-        searchWikipedia(query),
-        searchDuckDuckGoInstant(query)
-    ]);
-
-    const seen = new Set();
-    const merged = [...ddg, ...wiki].filter(r => {
-        if (seen.has(r.title)) return false;
-        seen.add(r.title);
-        return true;
-    });
-
-    return merged.slice(0, 4);
 }
 
 function formatSearchContext(query, results) {
     if (!results.length) {
-        return `[Searched Wikipedia and DuckDuckGo's reference API for "${query}" but found no matching entries. These free sources cover general knowledge/encyclopedia topics well but do NOT include breaking news, live scores, or today's headlines. If the user asked about current events/news, say clearly you don't have a live news feed right now rather than guessing — but you DO know today's real date from the system info above, so use that confidently if relevant.]`;
+        return `(Web search for "${query}" didn't return anything usable — could be a transient issue or the search key isn't configured. Answer from general knowledge and mention you couldn't pull live results for this one, without over-apologizing.)`;
     }
-    const lines = results.map((r, i) => `${i + 1}. ${r.title}\n   ${r.snippet}\n   Source: ${r.url}`).join("\n\n");
-    return `[Reference info fetched just now from Wikipedia/DuckDuckGo for "${query}" — this is real encyclopedia/factual data, not a news feed. Use it to answer accurately, cite sources naturally (e.g. "according to Wikipedia"). Note: these sources are strong for facts, definitions, historical/biographical info — but weak for breaking news or live scores, so don't overstate freshness for time-sensitive topics they don't cover:\n\n${lines}]`;
+    const lines = results.map((r, i) => `${i + 1}. ${r.title}\n   ${r.snippet}${r.url ? `\n   Source: ${r.url}` : ""}`).join("\n\n");
+    return `(Live web search results fetched just now for "${query}" — use this for current, accurate info and cite sources naturally (e.g. "according to X"). Still follow your normal formatting/action-tag rules for whatever the user is actually asking for:\n\n${lines})`;
 }
 
 export default async function handler(req, res) {
@@ -143,20 +101,25 @@ export default async function handler(req, res) {
         const systemPrompt = getMoodPrompt(mood);
 
         // ── Web Search (optional, user-toggled) ──────────────────
-        //    Runs a live DuckDuckGo search on the latest user message
-        //    and injects the results as a system-level context block
-        //    right before the AI call. Fixes "outdated knowledge" —
-        //    e.g. wrong answers to "what's today's date" or current events.
+        //    Runs a live search and injects the results as a PREFIX on
+        //    the user's own message (same pattern as file-attachment
+        //    context) — NOT as a separate system-role message. Putting
+        //    it as a system message mid-conversation was making the
+        //    model treat it as an overriding instruction ("answer using
+        //    ONLY this data"), which suppressed action tags like
+        //    [CHART]/[PDF]/[PREVIEW] entirely when search was on. As a
+        //    plain context prefix, the model treats it as reference
+        //    material alongside its normal tag-generation behavior.
         let outgoingMessages = messages;
         if (webSearch) {
-            const lastUserMsg = [...messages].reverse().find(m => m.role === "user");
-            if (lastUserMsg?.content) {
+            const lastIdx = messages.length - 1;
+            const lastUserMsg = messages[lastIdx];
+            if (lastUserMsg?.role === "user" && lastUserMsg.content) {
                 const results = await performWebSearch(lastUserMsg.content);
                 const searchContext = formatSearchContext(lastUserMsg.content, results);
                 outgoingMessages = [
-                    ...messages.slice(0, -1),
-                    { role: "system", content: searchContext },
-                    messages[messages.length - 1]
+                    ...messages.slice(0, lastIdx),
+                    { role: "user", content: `${searchContext}\n\n${lastUserMsg.content}` }
                 ];
             }
         }
@@ -214,8 +177,9 @@ Today's date is ${new Date().toLocaleDateString("en-IN", { weekday: "long", year
 If asked "what's today's date" or similar, answer directly and confidently with this date — do not say you don't know or guess an old date.
 
 ━━━ WEB SEARCH CONTEXT ━━━
-If a message starts with "[Reference info fetched just now from Wikipedia/DuckDuckGo..." or "[Searched Wikipedia and DuckDuckGo's reference API...", that's real data fetched just now from Wikipedia + DuckDuckGo's factual-answer API — genuinely more reliable than your training data for general knowledge, facts, definitions, historical/biographical info, and "what is X" / "who is X" questions. Use it and cite sources naturally (e.g. "according to Wikipedia").
-These sources are encyclopedia-style, NOT a live news feed — they don't have today's headlines, live scores, or breaking news. If the context says no results were found, or the user is clearly asking about breaking news/current events these sources can't cover, say so honestly (e.g. "I don't have a live news feed right now") instead of guessing or inventing headlines. This is a real limit of free sources, not something to apologize heavily for — just be straightforward about it.
+Sometimes the user's message will start with a parenthetical block like "(Live web search results fetched just now for...)" — that's real, current data from an actual web search (Tavily), genuinely more reliable than your training data for anything time-sensitive: news, current events, prices, scores, "who is the current X", recent releases, etc. Use it and cite sources naturally (e.g. "according to [source]") as part of your normal answer.
+If the block says the search didn't return anything usable, say so honestly instead of guessing or inventing information.
+IMPORTANT: This search info is just extra context, not a replacement for your normal behavior. If the user is asking for a chart, PDF, PPT, live preview, or image (see SMART OUTPUT TAGS below), you still generate the matching tag exactly as you normally would — search results and action tags are not mutually exclusive. E.g. "make a chart of India's GDP growth" → still respond with a [CHART] tag, using the real numbers found in search if relevant.
 For "what's today's date" — you already know this from the Current Date info above regardless of whether search ran; answer it directly and confidently.
 
 ━━━ CORE IDENTITY ━━━
