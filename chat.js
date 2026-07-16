@@ -38,6 +38,10 @@ const moodList         = document.getElementById("moodList");
 const currentMoodLabel = document.getElementById("currentMoodLabel");
 const recentMoods      = document.getElementById("recentMoods");
 
+// Bloom Mode (inline image generation / description)
+const bloomBtn         = document.getElementById("bloomBtn");
+const bloomOptsRow      = document.getElementById("bloomOptsRow");
+
 // File Upload
 const attachBtn        = document.getElementById("attachBtn");
 const fileInput        = document.getElementById("fileInput");
@@ -78,6 +82,10 @@ let isRecording     = false;
 let recognition     = null;
 let toastTimer      = null;
 let lastPreviewHTML = "";
+
+// Bloom Mode state — mirrors bloom.html's generator options
+let bloomMode  = false;
+let bloomState = { ratio: "1024x1024", model: "flux" };
 
 // Code file extensions — read as text, wrapped in fenced blocks for AI
 const CODE_EXTS = new Set([
@@ -148,6 +156,30 @@ moodBtn.addEventListener("click", e => {
 document.addEventListener("click", () => {
     moodList.classList.remove("show");
     moodBtn.classList.remove("open");
+});
+
+// ------------------------------------------
+// 5b. Bloom Mode — toggle + option buttons
+//     ON: input bar switches to image gen/describe flow
+//     OFF: normal chat, unchanged
+// ------------------------------------------
+bloomBtn.addEventListener("click", () => {
+    bloomMode = !bloomMode;
+    bloomBtn.classList.toggle("active", bloomMode);
+    bloomOptsRow.style.display = bloomMode ? "flex" : "none";
+    inputBox.placeholder = bloomMode
+        ? "Describe an image to generate... (attach a photo to describe it instead)"
+        : (selectedFiles.length ? "Ask a question about these files (optional)..." : "Message Shanu AI...");
+    showToast(bloomMode ? "🎨 Bloom mode on — type to generate, attach to describe" : "Bloom mode off");
+});
+
+bloomOptsRow.addEventListener("click", e => {
+    const btn = e.target.closest(".bloom-opt-btn");
+    if (!btn) return;
+    const { type, val } = btn.dataset;
+    bloomOptsRow.querySelectorAll(`.bloom-opt-btn[data-type="${type}"]`).forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    bloomState[type] = val;
 });
 
 function addToRecentMoods(moodObj) {
@@ -881,7 +913,9 @@ function clearAllFiles() {
     ocrProgressBar.classList.remove("show");
     ocrProgressFill.style.width = "0%";
     renderFileChips();
-    inputBox.placeholder = "Message Shanu AI...";
+    inputBox.placeholder = bloomMode
+        ? "Describe an image to generate... (attach a photo to describe it instead)"
+        : "Message Shanu AI...";
 }
 
 // ------------------------------------------
@@ -918,6 +952,16 @@ fileInput.addEventListener("change", e => {
 // ------------------------------------------
 async function handleSendAction() {
     if (sending) return;
+
+    // Bloom mode: image generation (no attachment) or description (attachment present)
+    if (bloomMode) {
+        if (selectedFiles.length) { await processBloomDescribe(); return; }
+        const prompt = inputBox.value.trim();
+        if (!prompt) return;
+        await sendBloomGenerate(prompt);
+        return;
+    }
+
     if (selectedFiles.length) { await processAndSendFiles(); return; }
     const text = inputBox.value.trim();
     if (!text) return;
@@ -1031,6 +1075,139 @@ async function processAndSendFiles() {
     clearAllFiles();
     unlockUI();
     await callAPI();
+}
+
+// ------------------------------------------
+// 19b. Bloom — inline image generation (Pollinations, same as bloom.html)
+// ------------------------------------------
+function buildBloomImageUrl(prompt, ratio, model, seed) {
+    const [w, h] = ratio.split("x");
+    const params = new URLSearchParams({
+        width: w, height: h, model, seed,
+        nologo: "true",
+        referrer: "shanu-ai-bloom"
+    });
+    return `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?${params.toString()}`;
+}
+
+async function sendBloomGenerate(prompt) {
+    addMessage(prompt, "user");
+    inputBox.value = ""; resizeInput();
+    hidePlaceholder();
+
+    const ratio = bloomState.ratio;
+    const model = bloomState.model;
+    const seed  = Math.floor(Math.random() * 1000000);
+    const wrapClass = ratio === "1024x576" ? "wide" : (ratio === "768x1024" ? "tall" : "");
+
+    const row = document.createElement("div");
+    row.className = "msg bot";
+    row.innerHTML = `
+        <div class="bloom-img-card">
+            <div class="bloom-img-wrap ${wrapClass}">
+                <div class="bloom-img-loader">
+                    <div class="bloom-spin"></div>
+                    <span>Generating with ${model}...</span>
+                </div>
+                <img alt="${prompt.replace(/"/g, "")}">
+            </div>
+            <div class="bloom-img-actions" style="display:none;">
+                <button class="bloom-regen-btn">↻ Regenerate</button>
+                <button class="bloom-download-btn">⇩ Save</button>
+            </div>
+        </div>
+    `;
+    chatBox.appendChild(row);
+    scrollToBottom();
+
+    loadBloomImage(row, prompt, ratio, model, seed);
+
+    // Save a lightweight record in chat history/context (image itself isn't sent to the text AI)
+    chatContext.push({ role: "user", content: `[Bloom image request: "${prompt}"]` });
+    await saveMessageToDB("user", `🎨 Generated image: "${prompt}"`);
+}
+
+function loadBloomImage(row, prompt, ratio, model, seed) {
+    const wrap    = row.querySelector(".bloom-img-wrap");
+    const loader  = wrap.querySelector(".bloom-img-loader");
+    const img     = wrap.querySelector("img");
+    const actions = row.querySelector(".bloom-img-actions");
+    const url     = buildBloomImageUrl(prompt, ratio, model, seed);
+
+    img.classList.remove("loaded");
+    loader.style.display = "flex";
+    actions.style.display = "none";
+    const oldErr = wrap.querySelector(".bloom-img-err");
+    if (oldErr) oldErr.remove();
+    img.style.display = "block";
+
+    img.onload = () => {
+        loader.style.display = "none";
+        img.classList.add("loaded");
+        actions.style.display = "flex";
+        scrollToBottom();
+    };
+    img.onerror = () => {
+        loader.style.display = "none";
+        img.style.display = "none";
+        const err = document.createElement("div");
+        err.className = "bloom-img-err";
+        err.innerHTML = `<span>⚠ Couldn't generate that image.</span><button>Try again</button>`;
+        err.querySelector("button").addEventListener("click", () => {
+            loadBloomImage(row, prompt, ratio, model, Math.floor(Math.random() * 1000000));
+        });
+        wrap.appendChild(err);
+    };
+    img.src = url;
+
+    row.querySelector(".bloom-regen-btn")?.addEventListener("click", () => {
+        loadBloomImage(row, prompt, ratio, model, Math.floor(Math.random() * 1000000));
+    }, { once: true });
+
+    row.querySelector(".bloom-download-btn")?.addEventListener("click", () => {
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `bloom-${seed}.jpg`;
+        a.target = "_blank";
+        a.rel = "noopener";
+        a.click();
+    }, { once: true });
+}
+
+// ------------------------------------------
+// 19c. Bloom — image description (reuses the existing /api/vision proxy,
+//      same describeImageWithGemini() used by the normal "photo mode" flow)
+// ------------------------------------------
+async function processBloomDescribe() {
+    const question = inputBox.value.trim();
+    inputBox.value = ""; resizeInput();
+
+    const { file } = selectedFiles[0]; // Bloom describe handles one image at a time
+    addFileBubbles();
+    lockUI();
+    hidePlaceholder();
+
+    const typingEl = showTyping();
+    let description;
+    try {
+        description = await describeImageWithGemini(file);
+    } catch (err) {
+        typingEl.remove();
+        addMessage(`❌ Couldn't describe that image — ${err.message || "unknown error"}`, "bot", false);
+        clearAllFiles();
+        unlockUI();
+        return;
+    }
+    typingEl.remove();
+    addMessage(description, "bot", true);
+
+    chatContext.push({ role: "user", content: `[Bloom image attached]${question ? " Question: " + question : ""}` });
+    chatContext.push({ role: "assistant", content: description });
+    await saveMessageToDB("user", `🖼️ Described image: ${file.name}`);
+    await saveMessageToDB("assistant", description);
+
+    clearAllFiles();
+    unlockUI();
 }
 
 // ── Gemini Vision — describes photos/objects (Google AI Studio key) ──
