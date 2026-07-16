@@ -350,7 +350,7 @@ function unlockUI() {
 //    4. Uses .msg-actions bar (matches style.css)
 //    5. parseActions=false for history load (no re-triggering old actions)
 // ------------------------------------------
-async function addMessage(text, type = "bot", parseActions = true) {
+async function addMessage(text, type = "bot", actionMode = "live") {
     hidePlaceholder();
     const div = document.createElement("div");
     div.className = `msg ${type}`;
@@ -358,11 +358,14 @@ async function addMessage(text, type = "bot", parseActions = true) {
     if (type === "bot") {
 
         // ── Step 1: Parse action tags ONCE ──
+        //    actionMode: "live" (fresh reply, execute/download normally),
+        //    "history" (page-load replay, show cards without re-triggering
+        //    downloads/popups), or false (skip parsing entirely).
         let displayText = text;
         let indicator   = null;
 
-        if (parseActions) {
-            const parsed = await parseAndExecuteActions(text);
+        if (actionMode) {
+            const parsed = await parseAndExecuteActions(text, actionMode);
             displayText  = parsed.cleanText;
             indicator    = parsed.indicator;
         }
@@ -460,6 +463,34 @@ async function addMessage(text, type = "bot", parseActions = true) {
                     a.click();
                     showToast(`${isPdf ? "📄" : "📊"} ${indicator.filename} downloaded!`);
                 });
+            } else if (indicator.type === "pdf-history" || indicator.type === "ppt-history") {
+                // From a page reload — the original blob URL is gone (blob:
+                // URLs die with the tab), so offer a Regenerate button that
+                // rebuilds it on demand from the saved tag content, instead
+                // of silently losing the PDF/PPT after every refresh.
+                const isPdf = indicator.type === "pdf-history";
+                card.innerHTML = `
+                    <i class="fa-solid ${isPdf ? "fa-file-pdf" : "fa-file-powerpoint"}"></i>
+                    <span>${isPdf ? "PDF" : "Presentation"} from earlier — regenerate to view/download</span>
+                    <div class="action-result-btns">
+                        <button class="action-result-btn regen-btn"><i class="fa-solid fa-rotate"></i> Regenerate</button>
+                    </div>`;
+                card.querySelector(".regen-btn").addEventListener("click", async function () {
+                    this.disabled = true;
+                    this.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Working...';
+                    const result = isPdf ? generatePDF(indicator.content) : await generatePPT(indicator.content);
+                    if (!result) {
+                        this.disabled = false;
+                        this.innerHTML = '<i class="fa-solid fa-rotate"></i> Regenerate';
+                        return;
+                    }
+                    window.open(result.blobUrl, "_blank", "noopener");
+                    this.innerHTML = '<i class="fa-solid fa-check"></i> Ready — reopening...';
+                    setTimeout(() => {
+                        this.disabled = false;
+                        this.innerHTML = '<i class="fa-solid fa-rotate"></i> Regenerate';
+                    }, 2000);
+                });
             } else if (indicator.type === "preview") {
                 card.innerHTML = `
                     <i class="fa-solid fa-eye"></i>
@@ -550,8 +581,18 @@ function addFileBubbles() {
 //     Returns structured indicator data (not raw HTML) so addMessage()
 //     can build a re-openable card — View/Download stay clickable even
 //     after the message has scrolled past, instead of a one-time toast.
+//
+//     mode: "live"    — a fresh AI response just arrived. Execute tags
+//                        normally (generate PDF/PPT blob, auto-open the
+//                        live preview modal once).
+//           "history" — replaying old messages on page load/reload.
+//                        Do NOT re-generate blobs or auto-open the
+//                        preview modal (that would re-trigger a
+//                        "download"/popup for every old message on every
+//                        refresh). Instead show a card the user can tap
+//                        to regenerate/reopen on demand.
 // ------------------------------------------
-async function parseAndExecuteActions(rawText) {
+async function parseAndExecuteActions(rawText, mode = "live") {
     let text      = rawText;
     let indicator = null; // { type: "pdf"|"ppt"|"preview", ...data }
 
@@ -559,24 +600,37 @@ async function parseAndExecuteActions(rawText) {
     const pdfMatch = text.match(/\[PDF\]([\s\S]*?)\[\/PDF\]/i);
     if (pdfMatch) {
         text = text.replace(pdfMatch[0], "").trim();
-        const result = generatePDF(pdfMatch[1].trim());
-        if (result) indicator = { type: "pdf", ...result };
+        const content = pdfMatch[1].trim();
+        if (mode === "live") {
+            const result = generatePDF(content);
+            if (result) indicator = { type: "pdf", ...result };
+        } else {
+            // History replay — don't generate a blob now, just offer a
+            // regenerate button with the original content preserved.
+            indicator = { type: "pdf-history", content };
+        }
     }
 
     // [PPT]json[/PPT]
     const pptMatch = text.match(/\[PPT\]([\s\S]*?)\[\/PPT\]/i);
     if (pptMatch) {
         text = text.replace(pptMatch[0], "").trim();
-        const result = await generatePPT(pptMatch[1].trim());
-        if (result) indicator = { type: "ppt", ...result };
+        const content = pptMatch[1].trim();
+        if (mode === "live") {
+            const result = await generatePPT(content);
+            if (result) indicator = { type: "ppt", ...result };
+        } else {
+            indicator = { type: "ppt-history", content };
+        }
     }
 
     // [CHART]json[/CHART]
     const chartMatch = text.match(/\[CHART\]([\s\S]*?)\[\/CHART\]/i);
     if (chartMatch) {
         text = text.replace(chartMatch[0], "").trim();
+        // Safe to render in both modes — chart is a pure inline display,
+        // no download/popup side effect.
         setTimeout(() => generateChart(chartMatch[1].trim()), 120);
-        // No indicator pill — chart renders inline in chat
     }
 
     // [PREVIEW]html[/PREVIEW]
@@ -584,8 +638,12 @@ async function parseAndExecuteActions(rawText) {
     if (previewMatch) {
         text = text.replace(previewMatch[0], "").trim();
         const html = previewMatch[1].trim();
-        lastPreviewHTML = html;
-        setTimeout(() => showLivePreview(html), 150);
+        if (mode === "live") {
+            lastPreviewHTML = html;
+            setTimeout(() => showLivePreview(html), 150);
+        }
+        // Both modes get a Reopen card — history mode just doesn't
+        // auto-pop the modal open on load.
         indicator = { type: "preview", html };
     }
 
@@ -593,8 +651,8 @@ async function parseAndExecuteActions(rawText) {
     const imageMatch = text.match(/\[IMAGE\]([\s\S]*?)\[\/IMAGE\]/i);
     if (imageMatch) {
         text = text.replace(imageMatch[0], "").trim();
+        // Safe in both modes — same as chart, pure inline display.
         setTimeout(() => generateImage(imageMatch[1].trim()), 120);
-        // No indicator pill — image renders inline in chat bubble
     }
 
     return {
@@ -1585,7 +1643,7 @@ async function initChat() {
     if (localHistory.length > 0) {
         if (emptyPlaceholder) emptyPlaceholder.style.display = "none";
         localHistory.forEach(m => {
-            addMessage(m.content, m.role === "user" ? "user" : "bot", false);
+            addMessage(m.content, m.role === "user" ? "user" : "bot", "history");
             chatContext.push({ role: m.role, content: m.content });
         });
         renderedCount = localHistory.length;
@@ -1604,7 +1662,7 @@ async function initChat() {
             chatContext.length = 0;
             if (history.length > 0 && emptyPlaceholder) emptyPlaceholder.style.display = "none";
             history.forEach(m => {
-                addMessage(m.content, m.role === "user" ? "user" : "bot", false);
+                addMessage(m.content, m.role === "user" ? "user" : "bot", "history");
                 chatContext.push({ role: m.role, content: m.content });
             });
         }
