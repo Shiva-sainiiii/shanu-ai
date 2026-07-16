@@ -105,6 +105,12 @@
                         </button>
                         <div id="moodList" class="mood-dropdown glass-card"></div>
                     </div>
+
+                    <!-- Bloom Mode Toggle — inline image gen/describe, like Gemini's "Nano Banana" -->
+                    <button id="bloomBtn" class="glass-btn bloom-toggle-btn" title="Bloom — generate or describe images">
+                        <i class="fa-solid fa-wand-magic-sparkles"></i>
+                        <span>Bloom</span>
+                    </button>
                 </div>
                 <div class="header-right">
                     <div class="status-indicator">
@@ -136,6 +142,16 @@
             </section>
 
             <footer class="input-section">
+
+                <!-- Bloom Mode Options — ratio + model, shown only when Bloom mode is active -->
+                <div class="bloom-opts-row" id="bloomOptsRow" style="display:none;">
+                    <button class="bloom-opt-btn active" data-type="ratio" data-val="1024x1024">Square</button>
+                    <button class="bloom-opt-btn" data-type="ratio" data-val="768x1024">Portrait</button>
+                    <button class="bloom-opt-btn" data-type="ratio" data-val="1024x576">Wide</button>
+                    <span class="bloom-opt-sep"></span>
+                    <button class="bloom-opt-btn active" data-type="model" data-val="flux">Flux</button>
+                    <button class="bloom-opt-btn" data-type="model" data-val="turbo">Turbo</button>
+                </div>
 
                 <!-- Multi-File Preview Bar -->
                 <div class="file-preview-bar" id="filePreviewBar">
