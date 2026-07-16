@@ -1230,7 +1230,7 @@ async function callAPI() {
         const data = await res.json();
         typingEl.remove();
         const reply = data.reply || "Hmm... kuch samajh nahi aaya 🤔";
-        await addMessage(reply, "bot", true);
+        await addMessage(reply, "bot", "live");
         chatContext.push({ role: "assistant", content: reply });
         await saveMessageToDB("assistant", reply);
     } catch (err) {
@@ -1251,6 +1251,11 @@ async function processAndSendFiles() {
     // instantly and resolves once Cloudinary re-hosting finishes, giving
     // us permanent image URLs to persist (see fileThumbUrls below).
     const fileThumbUrlsPromise = addFileBubbles();
+    // addFileBubbles() only renders the file card(s) — it never showed the
+    // question the user typed alongside the attachment, so "what is this?"
+    // silently vanished from the live chat (it still reached the AI via
+    // contextMsg below, but the user never saw their own question appear).
+    if (question) addMessage(question, "user");
     lockUI();
 
     const total = selectedFiles.length;
@@ -1319,7 +1324,8 @@ async function processAndSendFiles() {
     //    safe to send as-is.
     chatContext.push({ role: "user", content: contextMsg });
     await saveMessageToDB("user", contextMsg, {
-        displayLabel: `[Files: ${selectedFiles.map(i => i.file.name).join(", ")}]${question ? " — " + question : ""}`,
+        displayLabel: `[Files: ${selectedFiles.map(i => i.file.name).join(", ")}]`,
+        questionText: question || null,
         fileThumbs: fileThumbUrls
     });
 
@@ -1450,7 +1456,7 @@ async function processBloomDescribe() {
         return;
     }
     typingEl.remove();
-    await addMessage(description, "bot", true);
+    await addMessage(description, "bot", "live");
 
     chatContext.push({ role: "user", content: `[Bloom image attached]${question ? " Question: " + question : ""}` });
     chatContext.push({ role: "assistant", content: description });
@@ -1699,16 +1705,26 @@ document.getElementById("settingsBtn")?.addEventListener("click", () => {
 // ── Replay a single saved message on page load ──
 //    m.content is always the FULL text (what the AI sees/saw — OCR text,
 //    vision description, etc). m.displayLabel, when present, is the short
-//    human-friendly text to actually show in the bubble instead (e.g.
-//    "[Files: photo.jpg] — what is this?" rather than the whole OCR dump).
+//    "[Files: photo.jpg]" tag shown instead of the whole OCR dump.
+//    m.questionText is the question the user typed alongside the file,
+//    shown as its own bubble AFTER the file card — same order as the live
+//    send flow (addFileBubbles() renders the card, then the question).
 //    m.fileThumbs restores image thumbnails that would otherwise vanish
 //    on refresh (blob: URLs don't survive a reload).
-function renderHistoryMessage(m) {
-    const bubbleText = m.displayLabel || m.content;
-    addMessage(bubbleText, m.role === "user" ? "user" : "bot", "history");
-    chatContext.push({ role: m.role, content: m.content });
+//
+//    IMPORTANT: this is async and must be awaited by its caller, in a
+//    plain for-loop (not .forEach, which doesn't wait). addMessage() is
+//    itself async — bot messages await parseAndExecuteActions() while
+//    user messages resolve immediately, so firing them all at once via
+//    forEach let every user bubble settle first and every bot bubble
+//    settle after, scrambling the whole thread into "all mine, then all
+//    its replies" instead of the real conversational order.
+async function renderHistoryMessage(m) {
+    const hasFileThumbs = m.role === "user" && m.fileThumbs && m.fileThumbs.some(u => u);
 
-    if (m.role === "user" && m.fileThumbs && m.fileThumbs.some(u => u)) {
+    if (hasFileThumbs) {
+        // File card(s) first — matches addFileBubbles() running before the
+        // question bubble in the live flow.
         m.fileThumbs.filter(Boolean).forEach(url => {
             const wrap = document.createElement("div");
             wrap.className = "msg file-msg user";
@@ -1723,6 +1739,20 @@ function renderHistoryMessage(m) {
             chatBox.appendChild(wrap);
         });
         scrollToBottom();
+
+        // Then the question as its own bubble, if one was typed.
+        if (m.questionText) await addMessage(m.questionText, "user", false);
+    } else {
+        const bubbleText = m.displayLabel || m.content;
+        await addMessage(bubbleText, m.role === "user" ? "user" : "bot", "history");
+    }
+
+    chatContext.push({ role: m.role, content: m.content });
+}
+
+async function renderHistorySequentially(history) {
+    for (const m of history) {
+        await renderHistoryMessage(m);
     }
 }
 
@@ -1732,7 +1762,7 @@ async function initChat() {
     let renderedCount = 0;
     if (localHistory.length > 0) {
         if (emptyPlaceholder) emptyPlaceholder.style.display = "none";
-        localHistory.forEach(renderHistoryMessage);
+        await renderHistorySequentially(localHistory);
         renderedCount = localHistory.length;
     }
 
@@ -1748,7 +1778,7 @@ async function initChat() {
             chatBox.innerHTML = "";
             chatContext.length = 0;
             if (history.length > 0 && emptyPlaceholder) emptyPlaceholder.style.display = "none";
-            history.forEach(renderHistoryMessage);
+            await renderHistorySequentially(history);
         }
     } catch (err) {
         console.error("Init error (localStorage history already shown):", err);
