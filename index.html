@@ -105,12 +105,6 @@
                         </button>
                         <div id="moodList" class="mood-dropdown glass-card"></div>
                     </div>
-
-                    <!-- Bloom Mode Toggle — inline image gen/describe, like Gemini's "Nano Banana" -->
-                    <button id="bloomBtn" class="glass-btn bloom-toggle-btn" title="Bloom — generate or describe images">
-                        <i class="fa-solid fa-wand-magic-sparkles"></i>
-                        <span>Bloom</span>
-                    </button>
                 </div>
                 <div class="header-right">
                     <div class="status-indicator">
@@ -164,10 +158,52 @@
                 <div class="input-container">
                     <div class="input-bar glass-card" id="inputBar">
 
-                        <button class="icon-action-btn attach-btn" id="attachBtn"
-                            title="Attach files — Images, PDFs, Code (.py .js .c .cpp .java ...)">
-                            <i class="fa-solid fa-paperclip"></i>
-                        </button>
+                        <div class="plus-menu-wrapper">
+                            <button class="icon-action-btn plus-btn" id="plusBtn" title="Add to chat">
+                                <i class="fa-solid fa-plus"></i>
+                            </button>
+
+                            <!-- ===== Add-to-chat bottom sheet ===== -->
+                            <div class="plus-sheet-backdrop" id="plusSheetBackdrop"></div>
+                            <div class="plus-sheet" id="plusSheet">
+                                <div class="plus-sheet-handle"></div>
+                                <div class="plus-sheet-header">
+                                    <span>Add to chat</span>
+                                    <button class="plus-sheet-close" id="plusSheetClose"><i class="fa-solid fa-xmark"></i></button>
+                                </div>
+
+                                <div class="plus-sheet-grid">
+                                    <button class="plus-tile" id="plusCameraBtn">
+                                        <span class="plus-tile-icon"><i class="fa-solid fa-camera"></i></span>
+                                        <span>Camera</span>
+                                    </button>
+                                    <button class="plus-tile" id="plusPhotosBtn">
+                                        <span class="plus-tile-icon"><i class="fa-solid fa-image"></i></span>
+                                        <span>Photos</span>
+                                    </button>
+                                    <button class="plus-tile" id="plusFilesBtn">
+                                        <span class="plus-tile-icon"><i class="fa-solid fa-file-arrow-up"></i></span>
+                                        <span>Files</span>
+                                    </button>
+                                </div>
+
+                                <button class="plus-sheet-row" id="plusWebSearchRow">
+                                    <span class="plus-row-icon"><i class="fa-solid fa-globe"></i></span>
+                                    <span class="plus-row-label">Web search</span>
+                                    <span class="plus-toggle" id="webSearchToggle"></span>
+                                </button>
+
+                                <button class="plus-sheet-row" id="plusBloomRow">
+                                    <span class="plus-row-icon"><i class="fa-solid fa-wand-magic-sparkles"></i></span>
+                                    <span class="plus-row-label">Bloom — generate or describe images</span>
+                                    <span class="plus-toggle" id="bloomToggle"></span>
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Hidden native file inputs — triggered by the sheet tiles above -->
+                        <input type="file" id="cameraInput" accept="image/*" capture="environment" hidden>
+                        <input type="file" id="photosInput" accept="image/*" multiple hidden>
 
                         <!-- multiple + all code/media types -->
                         <input type="file" id="fileInput"
