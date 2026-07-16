@@ -501,6 +501,26 @@ async function addMessage(text, type = "bot", actionMode = "live") {
                 card.querySelector(".view-btn").addEventListener("click", () => {
                     showLivePreview(indicator.html);
                 });
+            } else if (indicator.type === "image-history") {
+                // From a page reload — Pollinations image URLs use a random
+                // seed each time, so we never re-call generateImage() here
+                // (that would silently swap in a different picture on every
+                // refresh). Offer Regenerate instead, same as pdf/ppt-history.
+                card.innerHTML = `
+                    <i class="fa-solid fa-image"></i>
+                    <span>Image from earlier — regenerate to view</span>
+                    <div class="action-result-btns">
+                        <button class="action-result-btn regen-btn"><i class="fa-solid fa-rotate"></i> Regenerate</button>
+                    </div>`;
+                card.querySelector(".regen-btn").addEventListener("click", function () {
+                    this.disabled = true;
+                    this.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Painting...';
+                    generateImage(indicator.prompt);
+                    setTimeout(() => {
+                        this.disabled = false;
+                        this.innerHTML = '<i class="fa-solid fa-rotate"></i> Regenerate';
+                    }, 1500);
+                });
             }
 
             chatBox.appendChild(card);
@@ -517,6 +537,10 @@ async function addMessage(text, type = "bot", actionMode = "live") {
 }
 
 // ── File attachment bubble ────────────────────────────
+//    Returns an array (same order as selectedFiles) of Cloudinary URLs for
+//    image items (or null for non-images / failed uploads). Callers that
+//    need the images to survive a refresh should await this and persist
+//    the URLs — blob: thumbnails alone die with the tab/page reload.
 function addFileBubbles() {
     hidePlaceholder();
     const iconMap  = { image: "fa-image", pdf: "fa-file-pdf", code: "fa-code", text: "fa-file-lines" };
@@ -527,7 +551,7 @@ function addFileBubbles() {
         text:  "Text file — read"
     };
 
-    selectedFiles.forEach(item => {
+    const uploadPromises = selectedFiles.map(item => {
         const cat  = getFileCategory(item.file.type, item.file.name);
         const wrap = document.createElement("div");
         wrap.className = "msg file-msg user";
@@ -547,16 +571,23 @@ function addFileBubbles() {
                         <div class="file-msg-sub">${modeLabel}</div>
                     </div>
                 </div>`;
+            chatBox.appendChild(wrap);
+            scrollToBottom();
 
-            // Re-host on Cloudinary in the background for permanent history
-            // (blob URLs die when the tab closes / page reloads)
-            const reader = new FileReader();
-            reader.onload = () => {
-                uploadToCloudinary(reader.result, "shanu-ai/uploads").then(hostedUrl => {
-                    if (hostedUrl) wrap.querySelector(".file-msg-thumb").dataset.cloudinaryUrl = hostedUrl;
-                });
-            };
-            reader.readAsDataURL(item.file);
+            // Re-host on Cloudinary so this image survives a refresh
+            // (blob: URLs die when the tab closes / page reloads). We wait
+            // for this so the caller can save the permanent URL to DB.
+            return new Promise(resolve => {
+                const reader = new FileReader();
+                reader.onload = () => {
+                    uploadToCloudinary(reader.result, "shanu-ai/uploads").then(hostedUrl => {
+                        if (hostedUrl) wrap.querySelector(".file-msg-thumb").dataset.cloudinaryUrl = hostedUrl;
+                        resolve(hostedUrl || null);
+                    });
+                };
+                reader.onerror = () => resolve(null);
+                reader.readAsDataURL(item.file);
+            });
 
         } else {
             wrap.innerHTML = `
@@ -569,10 +600,14 @@ function addFileBubbles() {
                         <div class="file-msg-sub">${labelMap[cat] || "Attached"}</div>
                     </div>
                 </div>`;
+            chatBox.appendChild(wrap);
+            scrollToBottom();
+            return Promise.resolve(null);
         }
-        chatBox.appendChild(wrap);
     });
+
     scrollToBottom();
+    return Promise.all(uploadPromises);
 }
 
 // ------------------------------------------
@@ -651,8 +686,19 @@ async function parseAndExecuteActions(rawText, mode = "live") {
     const imageMatch = text.match(/\[IMAGE\]([\s\S]*?)\[\/IMAGE\]/i);
     if (imageMatch) {
         text = text.replace(imageMatch[0], "").trim();
-        // Safe in both modes — same as chart, pure inline display.
-        setTimeout(() => generateImage(imageMatch[1].trim()), 120);
+        const prompt = imageMatch[1].trim();
+        if (mode === "live") {
+            // Fresh reply — generate now (this also re-hosts the result on
+            // Cloudinary in the background for a permanent URL).
+            setTimeout(() => generateImage(prompt), 120);
+        } else {
+            // History replay — do NOT call Pollinations again here. Each
+            // call mints a new random seed, so re-running this on every
+            // refresh silently swaps in a different image. Show a static
+            // card with a Regenerate button instead, same pattern as
+            // PDF/PPT history cards.
+            indicator = { type: "image-history", prompt };
+        }
     }
 
     return {
@@ -1201,7 +1247,10 @@ async function callAPI() {
 async function processAndSendFiles() {
     const question = inputBox.value.trim();
     inputBox.value = ""; resizeInput();
-    addFileBubbles();
+    // Runs in parallel with OCR/vision below — addFileBubbles() renders
+    // instantly and resolves once Cloudinary re-hosting finishes, giving
+    // us permanent image URLs to persist (see fileThumbUrls below).
+    const fileThumbUrlsPromise = addFileBubbles();
     lockUI();
 
     const total = selectedFiles.length;
@@ -1258,10 +1307,21 @@ async function processAndSendFiles() {
     let contextMsg = `[📎 ${total} file${total > 1 ? "s" : ""} uploaded]${combined}`;
     if (question) contextMsg += `\n\n${"─".repeat(40)}\nUser's Question: ${question}`;
 
-    const dbSummary = `[Files: ${selectedFiles.map(i => i.file.name).join(", ")}]${question ? " — " + question : ""}`;
+    // Cloudinary URLs for any image attachments (null for non-images or
+    // failed uploads), same order as selectedFiles.
+    const fileThumbUrls = await fileThumbUrlsPromise;
 
+    // ── Save the SAME content the AI sees, not just the filenames. ──
+    //    Previously only "[Files: a.jpg] — question" was persisted, so a
+    //    refresh brought back the question but lost the OCR/vision text —
+    //    the AI would then reply with no idea what was in the file.
+    //    saveMessageToDB() already truncates to 3500 chars, so this is
+    //    safe to send as-is.
     chatContext.push({ role: "user", content: contextMsg });
-    await saveMessageToDB("user", dbSummary);
+    await saveMessageToDB("user", contextMsg, {
+        displayLabel: `[Files: ${selectedFiles.map(i => i.file.name).join(", ")}]${question ? " — " + question : ""}`,
+        fileThumbs: fileThumbUrls
+    });
 
     clearAllFiles();
     unlockUI();
@@ -1636,16 +1696,43 @@ document.getElementById("settingsBtn")?.addEventListener("click", () => {
 //     Fixes the race condition where history loaded before Firebase
 //     anonymous auth resolved, causing empty/wrong history
 // ------------------------------------------
+// ── Replay a single saved message on page load ──
+//    m.content is always the FULL text (what the AI sees/saw — OCR text,
+//    vision description, etc). m.displayLabel, when present, is the short
+//    human-friendly text to actually show in the bubble instead (e.g.
+//    "[Files: photo.jpg] — what is this?" rather than the whole OCR dump).
+//    m.fileThumbs restores image thumbnails that would otherwise vanish
+//    on refresh (blob: URLs don't survive a reload).
+function renderHistoryMessage(m) {
+    const bubbleText = m.displayLabel || m.content;
+    addMessage(bubbleText, m.role === "user" ? "user" : "bot", "history");
+    chatContext.push({ role: m.role, content: m.content });
+
+    if (m.role === "user" && m.fileThumbs && m.fileThumbs.some(u => u)) {
+        m.fileThumbs.filter(Boolean).forEach(url => {
+            const wrap = document.createElement("div");
+            wrap.className = "msg file-msg user";
+            wrap.innerHTML = `
+                <div class="file-msg-card file-msg-image-card">
+                    <img src="${url}" class="file-msg-thumb" alt="attachment">
+                    <div class="file-msg-info">
+                        <div class="file-msg-name">Attached image</div>
+                        <div class="file-msg-sub">From earlier</div>
+                    </div>
+                </div>`;
+            chatBox.appendChild(wrap);
+        });
+        scrollToBottom();
+    }
+}
+
 async function initChat() {
     // ── Step 1: Instant render from localStorage (no network wait) ──
     const localHistory = loadLocalHistorySync();
     let renderedCount = 0;
     if (localHistory.length > 0) {
         if (emptyPlaceholder) emptyPlaceholder.style.display = "none";
-        localHistory.forEach(m => {
-            addMessage(m.content, m.role === "user" ? "user" : "bot", "history");
-            chatContext.push({ role: m.role, content: m.content });
-        });
+        localHistory.forEach(renderHistoryMessage);
         renderedCount = localHistory.length;
     }
 
@@ -1661,10 +1748,7 @@ async function initChat() {
             chatBox.innerHTML = "";
             chatContext.length = 0;
             if (history.length > 0 && emptyPlaceholder) emptyPlaceholder.style.display = "none";
-            history.forEach(m => {
-                addMessage(m.content, m.role === "user" ? "user" : "bot", "history");
-                chatContext.push({ role: m.role, content: m.content });
-            });
+            history.forEach(renderHistoryMessage);
         }
     } catch (err) {
         console.error("Init error (localStorage history already shown):", err);
