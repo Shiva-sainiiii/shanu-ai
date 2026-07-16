@@ -77,9 +77,12 @@ function saveLocalHistory(messages) {
     }
 }
 
-function appendLocalMessage(role, content) {
+function appendLocalMessage(role, content, meta = {}, seq = null) {
     const history = getLocalHistory();
-    history.push({ role, content, timestamp: Date.now() });
+    const entry = { role, content, timestamp: Date.now(), seq: seq ?? (history.length + 1) };
+    if (meta.displayLabel) entry.displayLabel = meta.displayLabel;
+    if (meta.fileThumbs && meta.fileThumbs.some(u => u)) entry.fileThumbs = meta.fileThumbs;
+    history.push(entry);
     saveLocalHistory(history);
 }
 
@@ -142,13 +145,37 @@ function getCurrentUserId() {
 // Firestore Helpers
 // ==========================================
 
+// ── Monotonic per-tab counter ──
+//    serverTimestamp() only resolves once Firestore's write actually
+//    commits, so two messages saved back-to-back (e.g. a user message
+//    immediately followed by the assistant's reply) can occasionally
+//    commit in a different order than they were sent, especially over a
+//    slow connection. orderBy("timestamp") then sorts them wrong and
+//    that wrong order gets written back into localStorage too, visibly
+//    scrambling the whole thread on the next reload.
+//    A simple incrementing counter recorded at save-time removes the
+//    ambiguity — it always reflects call order within this tab/session,
+//    regardless of network timing.
+let localSeqCounter = 0;
+
 /**
  * Save a single message to Firestore under the current user's ID.
- * Includes serverTimestamp for consistent ordering.
+ * Includes serverTimestamp for cross-device ordering, plus a local
+ * monotonic seq as a tie-breaker so same-session ordering never scrambles.
+ *
+ * @param {string} role
+ * @param {string} content - full content (what the AI/history should see)
+ * @param {object} [meta] - optional extras:
+ *   meta.displayLabel — shorter text to actually render in the chat bubble
+ *                       on history replay (falls back to `content` if omitted)
+ *   meta.fileThumbs   — array of Cloudinary URLs for attached images, so
+ *                       thumbnails can be restored after a refresh
  */
-export async function saveMessageToDB(role, content) {
+export async function saveMessageToDB(role, content, meta = {}) {
+    const seq = ++localSeqCounter;
+
     // ── Write-through: localStorage first (instant, never fails silently) ──
-    appendLocalMessage(role, content);
+    appendLocalMessage(role, content, meta, seq);
 
     try {
         const userId    = getCurrentUserId();
@@ -156,12 +183,17 @@ export async function saveMessageToDB(role, content) {
             ? content.slice(0, 3500) + "\n...[truncated]"
             : content;
 
-        await addDoc(collection(db, "chats"), {
+        const docData = {
             sessionId: userId,          // Strict per-user isolation
             role,
             content:   safeContent,
+            seq,                         // Tie-breaker for stable ordering
             timestamp: serverTimestamp() // Server-side timestamp — no clock skew
-        });
+        };
+        if (meta.displayLabel) docData.displayLabel = meta.displayLabel;
+        if (meta.fileThumbs && meta.fileThumbs.some(u => u)) docData.fileThumbs = meta.fileThumbs;
+
+        await addDoc(collection(db, "chats"), docData);
     } catch (e) {
         console.warn("Firestore Save Warning (localStorage backup still saved):", e.message);
     }
@@ -186,9 +218,30 @@ export async function loadHistoryFromDB(limitCount = 30) {
         const messages = [];
         snapshot.forEach(d => messages.push(d.data()));
 
+        // ── Stable tie-break on seq ──
+        //    serverTimestamp() resolves at commit time, so two messages
+        //    saved in quick succession (a user turn immediately followed
+        //    by the assistant's reply) can occasionally commit out of
+        //    send-order, especially on a slow connection. orderBy alone
+        //    then returns them scrambled. seq was recorded client-side at
+        //    the moment each save was *called*, so re-sorting by it here
+        //    restores the true conversational order before anything is
+        //    rendered or written back to localStorage.
+        messages.sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0));
+
         if (messages.length > 0) {
-            // Firestore is source of truth when reachable — refresh local cache
-            saveLocalHistory(messages.map(m => ({ role: m.role, content: m.content, timestamp: Date.now() })));
+            // Firestore is source of truth when reachable — refresh local
+            // cache. Keep seq/displayLabel/fileThumbs — dropping them here
+            // previously meant every reload after this one lost the extra
+            // fields even though Firestore still had them.
+            saveLocalHistory(messages.map(m => ({
+                role:         m.role,
+                content:      m.content,
+                timestamp:    Date.now(),
+                seq:          m.seq,
+                displayLabel: m.displayLabel,
+                fileThumbs:   m.fileThumbs
+            })));
             return messages;
         }
 
