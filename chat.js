@@ -38,12 +38,25 @@ const moodList         = document.getElementById("moodList");
 const currentMoodLabel = document.getElementById("currentMoodLabel");
 const recentMoods      = document.getElementById("recentMoods");
 
-// Bloom Mode (inline image generation / description)
-const bloomBtn         = document.getElementById("bloomBtn");
-const bloomOptsRow      = document.getElementById("bloomOptsRow");
+// Bloom Mode (inline image generation / description) — now toggled from + sheet
+const bloomOptsRow     = document.getElementById("bloomOptsRow");
+
+// Plus menu (Add to chat) — Claude-style bottom sheet
+const plusBtn            = document.getElementById("plusBtn");
+const plusSheet          = document.getElementById("plusSheet");
+const plusSheetBackdrop  = document.getElementById("plusSheetBackdrop");
+const plusSheetClose     = document.getElementById("plusSheetClose");
+const plusCameraBtn      = document.getElementById("plusCameraBtn");
+const plusPhotosBtn      = document.getElementById("plusPhotosBtn");
+const plusFilesBtn       = document.getElementById("plusFilesBtn");
+const plusWebSearchRow   = document.getElementById("plusWebSearchRow");
+const webSearchToggleEl  = document.getElementById("webSearchToggle");
+const plusBloomRow       = document.getElementById("plusBloomRow");
+const bloomToggleEl      = document.getElementById("bloomToggle");
+const cameraInput        = document.getElementById("cameraInput");
+const photosInput        = document.getElementById("photosInput");
 
 // File Upload
-const attachBtn        = document.getElementById("attachBtn");
 const fileInput        = document.getElementById("fileInput");
 const filePreviewBar   = document.getElementById("filePreviewBar");
 const multiFileList    = document.getElementById("multiFileList");
@@ -86,6 +99,9 @@ let lastPreviewHTML = "";
 // Bloom Mode state — mirrors bloom.html's generator options
 let bloomMode  = false;
 let bloomState = { ratio: "1024x1024", model: "flux" };
+
+// Web Search state — toggled from + sheet, sent to /api/ask
+let webSearchOn = false;
 
 // Code file extensions — read as text, wrapped in fenced blocks for AI
 const CODE_EXTS = new Set([
@@ -159,13 +175,77 @@ document.addEventListener("click", () => {
 });
 
 // ------------------------------------------
-// 5b. Bloom Mode — toggle + option buttons
-//     ON: input bar switches to image gen/describe flow
-//     OFF: normal chat, unchanged
+// 5b. Plus Menu (Add to chat) — Claude-style bottom sheet
+//     Replaces the old single paperclip attach button. Camera/Photos
+//     pick images with intent already known (→ photo/vision mode),
+//     Files picks documents (→ OCR/text mode). No more ambiguity about
+//     which mode an attached image should use.
 // ------------------------------------------
-bloomBtn.addEventListener("click", () => {
+function openPlusSheet() {
+    plusSheet.classList.add("show");
+    plusSheetBackdrop.classList.add("show");
+    plusBtn.classList.add("open");
+}
+
+function closePlusSheet() {
+    plusSheet.classList.remove("show");
+    plusSheetBackdrop.classList.remove("show");
+    plusBtn.classList.remove("open");
+}
+
+plusBtn.addEventListener("click", e => {
+    e.stopPropagation();
+    plusSheet.classList.contains("show") ? closePlusSheet() : openPlusSheet();
+});
+
+plusSheetClose.addEventListener("click", closePlusSheet);
+plusSheetBackdrop.addEventListener("click", closePlusSheet);
+plusSheet.addEventListener("click", e => e.stopPropagation());
+
+// ── Camera → capture a photo → always Photo/Vision mode ──
+plusCameraBtn.addEventListener("click", () => {
+    closePlusSheet();
+    cameraInput.click();
+});
+
+cameraInput.addEventListener("change", e => {
+    const files = Array.from(e.target.files || []);
+    if (files.length) addFilesWithMode(files, "photo");
+    cameraInput.value = "";
+});
+
+// ── Photos → pick from gallery → always Photo/Vision mode ──
+//    (Gallery images are usually real photos/screenshots the user wants
+//    *described*, not scanned documents — Photo mode is the safer default
+//    here, unlike the generic Files picker.)
+plusPhotosBtn.addEventListener("click", () => {
+    closePlusSheet();
+    photosInput.click();
+});
+
+photosInput.addEventListener("change", e => {
+    const files = Array.from(e.target.files || []);
+    if (files.length) addFilesWithMode(files, "photo");
+    photosInput.value = "";
+});
+
+// ── Files → documents, PDFs, code, or images treated as scans → Document/OCR mode ──
+plusFilesBtn.addEventListener("click", () => {
+    closePlusSheet();
+    fileInput.click();
+});
+
+// ── Web Search toggle ──
+plusWebSearchRow.addEventListener("click", () => {
+    webSearchOn = !webSearchOn;
+    webSearchToggleEl.classList.toggle("on", webSearchOn);
+    showToast(webSearchOn ? "🌐 Web search on — replies will use live results" : "Web search off");
+});
+
+// ── Bloom toggle (moved here from the header) ──
+plusBloomRow.addEventListener("click", () => {
     bloomMode = !bloomMode;
-    bloomBtn.classList.toggle("active", bloomMode);
+    bloomToggleEl.classList.toggle("on", bloomMode);
     bloomOptsRow.style.display = bloomMode ? "flex" : "none";
     inputBox.placeholder = bloomMode
         ? "Describe an image to generate... (attach a photo to describe it instead)"
@@ -921,29 +1001,36 @@ function clearAllFiles() {
 // ------------------------------------------
 // 17. File Input Handler
 // ------------------------------------------
-attachBtn.addEventListener("click", () => fileInput.click());
 
-fileInput.addEventListener("change", e => {
-    const files    = Array.from(e.target.files || []);
-    const big      = files.filter(f => f.size > 10 * 1024 * 1024);
-    if (big.length) { showToast(`⚠️ Too large (max 10MB): ${big.map(f => f.name).join(", ")}`); fileInput.value = ""; return; }
+// ── Shared helper: add files to selectedFiles with a given default
+//    imageMode. Called by Camera (photo), Photos (photo), and Files
+//    (document) — each entry point already knows the right intent,
+//    so no more forgetting to flip the Doc/Photo toggle after attaching. ──
+function addFilesWithMode(files, defaultImageMode = "document") {
+    const big = files.filter(f => f.size > 10 * 1024 * 1024);
+    if (big.length) { showToast(`⚠️ Too large (max 10MB): ${big.map(f => f.name).join(", ")}`); return; }
 
     const existing = new Set(selectedFiles.map(i => i.file.name));
     const added    = files.filter(f => !existing.has(f.name));
     added.forEach(f => selectedFiles.push({
         file: f,
         status: "",
-        imageMode: "document" // default — user can switch to "photo" via chip toggle
+        imageMode: defaultImageMode // user can still switch via the chip toggle if needed
     }));
 
     if (added.length) {
         renderFileChips();
         showToast(`📎 ${added.length} file${added.length > 1 ? "s" : ""} attached`);
-        inputBox.placeholder = "Ask a question about these files (optional)...";
+        if (!bloomMode) inputBox.placeholder = "Ask a question about these files (optional)...";
         inputBox.focus();
     } else {
         showToast("ℹ️ Files already attached.");
     }
+}
+
+fileInput.addEventListener("change", e => {
+    const files = Array.from(e.target.files || []);
+    addFilesWithMode(files, "document"); // Files picker → default Document/OCR mode
     fileInput.value = "";
 });
 
@@ -988,7 +1075,7 @@ async function callAPI() {
         const res  = await fetch("/api/ask", {
             method:  "POST",
             headers: { "Content-Type": "application/json" },
-            body:    JSON.stringify({ messages: chatContext.slice(-12), mood: currentMood })
+            body:    JSON.stringify({ messages: chatContext.slice(-12), mood: currentMood, webSearch: webSearchOn })
         });
         const data = await res.json();
         typingEl.remove();
