@@ -84,6 +84,11 @@ body {
     will-change: transform;
 }
 
+/* Performance mode — toggled from Settings, disables heavy animations on weak devices */
+body.reduce-motion .blob { animation: none !important; }
+body.reduce-motion .noise-overlay { display: none !important; }
+body.reduce-motion * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+
 .blob-1 {
     width: 500px; height: 500px;
     background: radial-gradient(circle, rgba(0,229,255,0.35) 0%, transparent 70%);
