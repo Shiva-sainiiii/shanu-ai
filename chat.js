@@ -22,7 +22,7 @@
 import {
     saveMessageToDB, loadHistoryFromDB, clearSessionDB, initAuth, waitForAuth, loadLocalHistorySync,
     getActiveChatId, startNewChatSession, switchActiveChatId,
-    listChatSessions, listChatSessionsSync, deleteChatSession
+    listChatSessions, listChatSessionsSync, deleteChatSession, logFeedback
 } from './firebase.js';
 
 // ------------------------------------------
@@ -528,13 +528,30 @@ async function addMessage(text, type = "bot", actionMode = "live") {
             pre.insertBefore(header, block);
         });
 
-        // ── Step 4: Response action bar — Copy Response ──
+        // ── Step 4: Response action bar — Copy, Share, Retry, Thumbs ──
         //    ✅ Uses .msg-actions + .msg-action-btn — matches style.css
+        //    Snapshot the context that produced this exact reply, BEFORE
+        //    the caller pushes the assistant turn — this is what Retry
+        //    re-sends, regardless of how many messages come after it later.
+        const contextSnapshot = chatContext.slice();
+
         const actionBar = document.createElement("div");
         actionBar.className = "msg-actions";
         actionBar.innerHTML = `
             <button class="msg-action-btn copy-resp-btn" title="Copy full response">
                 <i class="fa-solid fa-copy"></i> Copy
+            </button>
+            <button class="msg-action-icon-btn share-btn" title="Share">
+                <i class="fa-solid fa-share-nodes"></i>
+            </button>
+            <button class="msg-action-icon-btn retry-btn" title="Retry — get a new response">
+                <i class="fa-solid fa-rotate-right"></i>
+            </button>
+            <button class="msg-action-icon-btn thumb-up" title="Good response">
+                <i class="fa-solid fa-thumbs-up"></i>
+            </button>
+            <button class="msg-action-icon-btn thumb-down" title="Bad response">
+                <i class="fa-solid fa-thumbs-down"></i>
             </button>`;
 
         actionBar.querySelector(".copy-resp-btn").addEventListener("click", function () {
@@ -545,6 +562,46 @@ async function addMessage(text, type = "bot", actionMode = "live") {
                     this.innerHTML = '<i class="fa-solid fa-copy"></i> Copy';
                 }, 2000);
             });
+        });
+
+        actionBar.querySelector(".share-btn").addEventListener("click", async function () {
+            if (navigator.share) {
+                try {
+                    await navigator.share({ text: displayText, title: "Shanu AI" });
+                } catch (err) {
+                    if (err.name !== "AbortError") showToast("❌ Share failed");
+                }
+            } else {
+                navigator.clipboard.writeText(displayText);
+                showToast("📋 Sharing not supported here — copied instead");
+            }
+        });
+
+        actionBar.querySelector(".retry-btn").addEventListener("click", function () {
+            if (!contextSnapshot.length || contextSnapshot[contextSnapshot.length - 1].role !== "user") {
+                showToast("ℹ️ Nothing to retry here");
+                return;
+            }
+            regenerateReply(contextSnapshot, this);
+        });
+
+        const thumbUpBtn   = actionBar.querySelector(".thumb-up");
+        const thumbDownBtn = actionBar.querySelector(".thumb-down");
+        thumbUpBtn.addEventListener("click", () => {
+            const isActive = thumbUpBtn.classList.toggle("active");
+            thumbDownBtn.classList.remove("active");
+            if (isActive) {
+                logFeedback(getActiveChatId(), displayText, "up");
+                showToast("👍 Thanks for the feedback!");
+            }
+        });
+        thumbDownBtn.addEventListener("click", () => {
+            const isActive = thumbDownBtn.classList.toggle("active");
+            thumbUpBtn.classList.remove("active");
+            if (isActive) {
+                logFeedback(getActiveChatId(), displayText, "down");
+                showToast("👎 Thanks — noted for improvement");
+            }
         });
 
         div.appendChild(actionBar);
@@ -1337,18 +1394,22 @@ async function sendTextMessage(text) {
 // ------------------------------------------
 // 19. API Call
 // ------------------------------------------
+async function fetchReplyFor(contextArray) {
+    const res  = await fetch("/api/ask", {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ messages: contextArray.slice(-12), mood: currentMood, webSearch: webSearchOn })
+    });
+    const data = await res.json();
+    return data.reply || "Hmm... kuch samajh nahi aaya 🤔";
+}
+
 async function callAPI() {
     lockUI();
     const typingEl = showTyping();
     try {
-        const res  = await fetch("/api/ask", {
-            method:  "POST",
-            headers: { "Content-Type": "application/json" },
-            body:    JSON.stringify({ messages: chatContext.slice(-12), mood: currentMood, webSearch: webSearchOn })
-        });
-        const data = await res.json();
+        const reply = await fetchReplyFor(chatContext);
         typingEl.remove();
-        const reply = data.reply || "Hmm... kuch samajh nahi aaya 🤔";
         await addMessage(reply, "bot", "live");
         chatContext.push({ role: "assistant", content: reply });
         await saveMessageToDB("assistant", reply);
@@ -1357,6 +1418,33 @@ async function callAPI() {
         typingEl.remove();
         addMessage("❌ Network error! Please check your connection.", "bot", false);
     }
+    unlockUI();
+}
+
+/**
+ * Retry — re-asks the same question that produced this reply and appends
+ * a fresh answer at the end of the conversation. Doesn't touch or delete
+ * the original reply (or Firestore history), so nothing gets scrambled —
+ * it's an alternative answer, not an in-place edit.
+ */
+async function regenerateReply(contextSnapshot, retryBtn) {
+    if (sending) { showToast("⏳ Please wait for the current reply to finish"); return; }
+    retryBtn.classList.add("spinning");
+    lockUI();
+    const typingEl = showTyping();
+    try {
+        const reply = await fetchReplyFor(contextSnapshot);
+        typingEl.remove();
+        await addMessage(reply, "bot", "live");
+        chatContext.push({ role: "assistant", content: reply });
+        await saveMessageToDB("assistant", reply);
+        showToast("🔄 New response added below");
+    } catch (err) {
+        console.error("Retry Error:", err);
+        typingEl.remove();
+        showToast("❌ Retry failed — check your connection");
+    }
+    retryBtn.classList.remove("spinning");
     unlockUI();
 }
 
