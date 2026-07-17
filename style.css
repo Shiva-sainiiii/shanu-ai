@@ -1325,6 +1325,49 @@ body.reduce-motion * { animation-duration: 0.01ms !important; transition-duratio
 
 .msg-action-btn i { font-size: 11px; }
 
+/* Icon-only action buttons — Share, Retry, Thumbs up/down */
+.msg-action-icon-btn {
+    width: 30px; height: 30px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--glass-border);
+    color: var(--text-muted);
+    border-radius: 50%;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: var(--transition);
+    font-family: inherit;
+    font-size: 12px;
+}
+
+.msg-action-icon-btn:hover {
+    background: var(--primary-dim);
+    border-color: rgba(0, 229, 255, 0.25);
+    color: var(--primary);
+    transform: translateY(-1px);
+}
+
+.msg-action-icon-btn.thumb-up.active {
+    background: rgba(16, 185, 129, 0.15);
+    border-color: var(--accent-green);
+    color: var(--accent-green);
+}
+
+.msg-action-icon-btn.thumb-down.active {
+    background: rgba(244, 63, 94, 0.15);
+    border-color: var(--accent-red);
+    color: var(--accent-red);
+}
+
+.msg-action-icon-btn.retry-btn.spinning i {
+    animation: retrySpin 0.7s linear infinite;
+}
+
+@keyframes retrySpin {
+    to { transform: rotate(360deg); }
+}
+
 /* ========== INPUT SECTION ========== */
 .input-section {
     padding: 0 24px 20px;
