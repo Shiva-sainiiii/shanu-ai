@@ -19,7 +19,11 @@
 //   ✅ Wrong hljs theme (atom-one-dark → github-dark, matches CSS)
 // ==========================================
 
-import { saveMessageToDB, loadHistoryFromDB, clearSessionDB, initAuth, waitForAuth, loadLocalHistorySync } from './firebase.js';
+import {
+    saveMessageToDB, loadHistoryFromDB, clearSessionDB, initAuth, waitForAuth, loadLocalHistorySync,
+    getActiveChatId, startNewChatSession, switchActiveChatId,
+    listChatSessions, listChatSessionsSync, deleteChatSession
+} from './firebase.js';
 
 // ------------------------------------------
 // 1. DOM References
@@ -37,6 +41,7 @@ const moodBtn          = document.getElementById("moodBtn");
 const moodList         = document.getElementById("moodList");
 const currentMoodLabel = document.getElementById("currentMoodLabel");
 const recentMoods      = document.getElementById("recentMoods");
+const recentChats      = document.getElementById("recentChats");
 
 // Bloom Mode (inline image generation / description) — now toggled from + sheet
 const bloomOptsRow     = document.getElementById("bloomOptsRow");
@@ -295,6 +300,95 @@ function addToRecentMoods(moodObj) {
     };
     recentMoods.prepend(btn);
     if (recentMoods.children.length > 3) recentMoods.lastChild.remove();
+}
+
+// ------------------------------------------
+// 5c. Recent Chats (sidebar chat threads)
+// ------------------------------------------
+function renderChatSessionsList(sessions) {
+    const activeId = getActiveChatId();
+    recentChats.innerHTML = "";
+
+    if (!sessions || sessions.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "chat-session-empty";
+        empty.textContent = "No past chats yet";
+        recentChats.appendChild(empty);
+        return;
+    }
+
+    sessions.forEach(s => {
+        const row = document.createElement("div");
+        row.className = "chat-session-item" + (s.chatId === activeId ? " active" : "");
+        row.dataset.chatId = s.chatId;
+        row.innerHTML = `
+            <span class="chat-session-title">${(s.title || "New chat").replace(/</g, "&lt;")}</span>
+            <span class="chat-session-delete" title="Delete chat"><i class="fa-solid fa-trash-can"></i></span>`;
+
+        row.querySelector(".chat-session-title").addEventListener("click", () => switchToChat(s.chatId));
+
+        row.querySelector(".chat-session-delete").addEventListener("click", async (e) => {
+            e.stopPropagation();
+            if (!confirm("Delete this chat?")) return;
+            await deleteChatSession(s.chatId);
+            if (s.chatId === getActiveChatId()) {
+                // Deleted the chat we're currently viewing — start fresh
+                startNewChatSession();
+                chatBox.innerHTML = "";
+                chatContext.length = 0;
+                if (emptyPlaceholder) emptyPlaceholder.style.display = "";
+            }
+            refreshChatSessionsList();
+            showToast("🗑️ Chat deleted");
+        });
+
+        recentChats.appendChild(row);
+    });
+}
+
+async function refreshChatSessionsList() {
+    renderChatSessionsList(listChatSessionsSync()); // instant paint from cache
+    try {
+        const fresh = await listChatSessions(30);
+        renderChatSessionsList(fresh);               // reconcile with Firestore
+    } catch (_) { /* local cache already rendered */ }
+}
+
+async function switchToChat(chatId) {
+    if (chatId === getActiveChatId()) { sidebar.classList.remove("open"); sidebarOverlay.classList.remove("show"); return; }
+
+    switchActiveChatId(chatId);
+    chatBox.innerHTML = "";
+    chatContext.length = 0;
+    if (emptyPlaceholder) emptyPlaceholder.style.display = "none";
+    sidebar.classList.remove("open");
+    sidebarOverlay.classList.remove("show");
+
+    // Instant paint from local cache, then reconcile with Firestore
+    const local = loadLocalHistorySync(chatId);
+    if (local.length > 0) {
+        await renderHistorySequentially(local);
+    } else if (emptyPlaceholder) {
+        emptyPlaceholder.style.display = "";
+    }
+
+    try {
+        await initAuth();
+        await waitForAuth();
+        const history = await loadHistoryFromDB(chatId, 60);
+        if (history.length !== local.length) {
+            chatBox.innerHTML = "";
+            chatContext.length = 0;
+            if (history.length > 0 && emptyPlaceholder) emptyPlaceholder.style.display = "none";
+            if (history.length === 0 && emptyPlaceholder) emptyPlaceholder.style.display = "";
+            await renderHistorySequentially(history);
+        }
+    } catch (err) {
+        console.error("Chat switch reconcile error:", err);
+    }
+
+    refreshChatSessionsList();
+    scrollToBottom();
 }
 
 // ------------------------------------------
@@ -1713,9 +1807,14 @@ clearBtn.addEventListener("click", async () => {
 });
 
 newChatBtn.addEventListener("click", () => {
+    startNewChatSession();
+    chatBox.innerHTML = "";
+    chatContext.length = 0;
+    if (emptyPlaceholder) emptyPlaceholder.style.display = "";
     inputBox.focus();
     sidebar.classList.remove("open");
     sidebarOverlay.classList.remove("show");
+    refreshChatSessionsList();
 });
 
 // ------------------------------------------
@@ -1886,8 +1985,10 @@ async function renderHistorySequentially(history) {
 }
 
 async function initChat() {
+    const chatId = getActiveChatId();
+
     // ── Step 1: Instant render from localStorage (no network wait) ──
-    const localHistory = loadLocalHistorySync();
+    const localHistory = loadLocalHistorySync(chatId);
     let renderedCount = 0;
     if (localHistory.length > 0) {
         if (emptyPlaceholder) emptyPlaceholder.style.display = "none";
@@ -1895,13 +1996,16 @@ async function initChat() {
         renderedCount = localHistory.length;
     }
 
+    // Paint the sidebar's Recent Chats list from cache immediately too
+    renderChatSessionsList(listChatSessionsSync());
+
     // ── Step 2: Confirm/reconcile with Firestore in the background ──
     //    If Firestore has MORE messages than local (e.g. different device,
     //    or local cache was cleared), re-render the full authoritative set.
     try {
         await initAuth();      // Trigger anonymous sign-in
         await waitForAuth();   // Block until auth state settles
-        const history = await loadHistoryFromDB(30);
+        const history = await loadHistoryFromDB(chatId, 60);
 
         if (history.length > renderedCount) {
             chatBox.innerHTML = "";
@@ -1909,6 +2013,10 @@ async function initChat() {
             if (history.length > 0 && emptyPlaceholder) emptyPlaceholder.style.display = "none";
             await renderHistorySequentially(history);
         }
+
+        // Reconcile the sidebar list with Firestore too (cross-device sessions)
+        const sessions = await listChatSessions(30);
+        renderChatSessionsList(sessions);
     } catch (err) {
         console.error("Init error (localStorage history already shown):", err);
     }
