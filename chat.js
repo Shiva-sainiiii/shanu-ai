@@ -146,6 +146,26 @@ function showToast(msg, duration = 3200) {
 }
 
 // ------------------------------------------
+// 4b. Text-to-Speech (Auto-read replies)
+// ------------------------------------------
+function speakText(rawText) {
+    if (!window.speechSynthesis) return;
+    // Strip markdown symbols/code fences so TTS doesn't read out "hashtag" "asterisk" etc.
+    const clean = rawText
+        .replace(/```[\s\S]*?```/g, " code block ")
+        .replace(/[#*_`>~-]/g, "")
+        .replace(/\[(.*?)\]\(.*?\)/g, "$1")
+        .trim();
+    if (!clean) return;
+
+    window.speechSynthesis.cancel(); // don't stack multiple replies
+    const utter = new SpeechSynthesisUtterance(clean);
+    utter.lang = localStorage.getItem("shanuVoiceLang") || "hi-IN";
+    utter.rate = 1;
+    window.speechSynthesis.speak(utter);
+}
+
+// ------------------------------------------
 // 5. Mood Dropdown
 // ------------------------------------------
 MOODS.forEach(m => {
@@ -435,6 +455,11 @@ async function addMessage(text, type = "bot", actionMode = "live") {
 
         div.appendChild(actionBar);
         chatBox.appendChild(div);
+
+        // Auto-read aloud — only for fresh live replies, never on history replay
+        if (actionMode === "live" && localStorage.getItem("shanuAutoSpeak") === "on") {
+            speakText(displayText);
+        }
 
         // ── Step 5: Action result card — PDF/PPT get View+Download
         //    buttons, Preview gets a Reopen button. These stay clickable
@@ -1639,7 +1664,8 @@ function initSpeechRecognition() {
     if (!SR) { showToast("⚠️ Voice not supported. Use Chrome/Edge."); return false; }
 
     recognition = new SR();
-    recognition.lang = "hi-IN"; recognition.interimResults = true; recognition.continuous = false;
+    recognition.lang = localStorage.getItem("shanuVoiceLang") || "hi-IN";
+    recognition.interimResults = true; recognition.continuous = false;
 
     recognition.onstart = () => {
         isRecording = true;
@@ -1692,9 +1718,112 @@ newChatBtn.addEventListener("click", () => {
     sidebarOverlay.classList.remove("show");
 });
 
-document.getElementById("settingsBtn")?.addEventListener("click", () => {
-    showToast("⚙️ Settings — coming soon!");
+// ------------------------------------------
+// 23b. Settings Sheet
+// ------------------------------------------
+const settingsBtn        = document.getElementById("settingsBtn");
+const settingsBackdrop   = document.getElementById("settingsBackdrop");
+const settingsSheet      = document.getElementById("settingsSheet");
+const settingsClose      = document.getElementById("settingsClose");
+const autoSpeakToggle    = document.getElementById("autoSpeakToggle");
+const reduceMotionToggle = document.getElementById("reduceMotionToggle");
+const voiceLangHiBtn     = document.getElementById("voiceLangHi");
+const voiceLangEnBtn     = document.getElementById("voiceLangEn");
+const defaultMoodSelect  = document.getElementById("defaultMoodSelect");
+const settingsClearBtn   = document.getElementById("settingsClearBtn");
+const settingsAboutRow   = document.getElementById("settingsAboutRow");
+
+function openSettings() {
+    settingsBackdrop.classList.add("show");
+    settingsSheet.classList.add("show");
+}
+function closeSettings() {
+    settingsBackdrop.classList.remove("show");
+    settingsSheet.classList.remove("show");
+}
+
+settingsBtn?.addEventListener("click", () => {
+    sidebar.classList.remove("open");
+    sidebarOverlay.classList.remove("show");
+    openSettings();
 });
+settingsClose.addEventListener("click", closeSettings);
+settingsBackdrop.addEventListener("click", closeSettings);
+
+// Auto-read replies toggle
+autoSpeakToggle.classList.toggle("on", localStorage.getItem("shanuAutoSpeak") === "on");
+document.getElementById("autoSpeakRow").addEventListener("click", () => {
+    const on = autoSpeakToggle.classList.toggle("on");
+    localStorage.setItem("shanuAutoSpeak", on ? "on" : "off");
+    if (!on) window.speechSynthesis?.cancel();
+    showToast(on ? "🔊 Auto-read enabled" : "🔇 Auto-read disabled");
+});
+
+// Performance mode (reduce animations) toggle
+function applyReduceMotion(on) {
+    document.body.classList.toggle("reduce-motion", on);
+}
+const savedMotion = localStorage.getItem("shanuReduceMotion") === "on";
+reduceMotionToggle.classList.toggle("on", savedMotion);
+applyReduceMotion(savedMotion);
+document.getElementById("reduceMotionRow").addEventListener("click", () => {
+    const on = reduceMotionToggle.classList.toggle("on");
+    localStorage.setItem("shanuReduceMotion", on ? "on" : "off");
+    applyReduceMotion(on);
+    showToast(on ? "⚡ Performance mode on" : "✨ Performance mode off");
+});
+
+// Voice input language segmented control
+function setVoiceLangUI(lang) {
+    voiceLangHiBtn.classList.toggle("active", lang === "hi-IN");
+    voiceLangEnBtn.classList.toggle("active", lang === "en-IN");
+}
+setVoiceLangUI(localStorage.getItem("shanuVoiceLang") || "hi-IN");
+[voiceLangHiBtn, voiceLangEnBtn].forEach(btn => {
+    btn.addEventListener("click", () => {
+        const lang = btn.dataset.lang;
+        localStorage.setItem("shanuVoiceLang", lang);
+        setVoiceLangUI(lang);
+        recognition = null; // force re-init with new lang next time mic is used
+        showToast(`🎙️ Voice input set to ${lang === "hi-IN" ? "Hindi" : "English"}`);
+    });
+});
+
+// Default mood on new chat
+MOODS.forEach(m => {
+    const opt = document.createElement("option");
+    opt.value = m.value;
+    opt.textContent = m.label;
+    defaultMoodSelect.appendChild(opt);
+});
+defaultMoodSelect.value = localStorage.getItem("shanuDefaultMood") || "normal";
+defaultMoodSelect.addEventListener("change", () => {
+    localStorage.setItem("shanuDefaultMood", defaultMoodSelect.value);
+    showToast("💾 Default mood saved");
+});
+
+// Clear all chat history (same action as sidebar clear button)
+settingsClearBtn.addEventListener("click", async () => {
+    if (!confirm("Bhai, saari chat delete kar doon? 🗑️")) return;
+    await clearSessionDB();
+    closeSettings();
+});
+
+// About
+settingsAboutRow.addEventListener("click", () => {
+    showToast("💜 Shanu AI v1.0 — built by Shiva Saini");
+});
+
+// Apply saved default mood on load
+(function applyDefaultMoodOnLoad() {
+    const saved = localStorage.getItem("shanuDefaultMood");
+    if (!saved) return;
+    const m = MOODS.find(x => x.value === saved);
+    if (m) {
+        currentMood = m.value;
+        currentMoodLabel.textContent = m.label;
+    }
+})();
 
 // ------------------------------------------
 // 24. ✅ RESTORED: Auth-safe initialization (from old version)
