@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://shanu-ai-iota.vercel.app/sitemap.xml
