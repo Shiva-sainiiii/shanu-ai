@@ -307,6 +307,53 @@
         </div>
     </div>
 
+    <!-- ===== SETTINGS SHEET ===== -->
+    <div class="plus-sheet-backdrop" id="settingsBackdrop"></div>
+    <div class="plus-sheet" id="settingsSheet">
+        <div class="plus-sheet-handle"></div>
+        <div class="plus-sheet-header">
+            <span>Settings</span>
+            <button class="plus-sheet-close" id="settingsClose"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+
+        <button class="plus-sheet-row" id="autoSpeakRow" type="button">
+            <span class="plus-row-icon"><i class="fa-solid fa-volume-high"></i></span>
+            <span class="plus-row-label">Auto-read replies aloud</span>
+            <span class="plus-toggle" id="autoSpeakToggle"></span>
+        </button>
+
+        <button class="plus-sheet-row" id="reduceMotionRow" type="button">
+            <span class="plus-row-icon"><i class="fa-solid fa-gauge-high"></i></span>
+            <span class="plus-row-label">Performance mode <small style="color:var(--text-muted);font-weight:400;">(less animation)</small></span>
+            <span class="plus-toggle" id="reduceMotionToggle"></span>
+        </button>
+
+        <div class="plus-sheet-row" style="cursor:default;">
+            <span class="plus-row-icon"><i class="fa-solid fa-microphone"></i></span>
+            <span class="plus-row-label">Voice input language</span>
+            <div style="display:flex; gap:6px;">
+                <button class="bloom-opt-btn active" data-lang="hi-IN" id="voiceLangHi">Hindi</button>
+                <button class="bloom-opt-btn" data-lang="en-IN" id="voiceLangEn">English</button>
+            </div>
+        </div>
+
+        <div class="plus-sheet-row" style="cursor:default;">
+            <span class="plus-row-icon"><i class="fa-solid fa-masks-theater"></i></span>
+            <span class="plus-row-label">Default mood on new chat</span>
+            <select id="defaultMoodSelect" style="background:rgba(255,255,255,0.06); color:var(--text-main); border:1px solid var(--glass-border); border-radius:8px; padding:6px 8px; font-family:inherit; font-size:12.5px;"></select>
+        </div>
+
+        <button class="plus-sheet-row" id="settingsClearBtn" type="button">
+            <span class="plus-row-icon"><i class="fa-solid fa-trash-can" style="color:var(--accent-red);"></i></span>
+            <span class="plus-row-label">Clear all chat history</span>
+        </button>
+
+        <button class="plus-sheet-row" id="settingsAboutRow" type="button">
+            <span class="plus-row-icon"><i class="fa-solid fa-circle-info"></i></span>
+            <span class="plus-row-label">About Shanu AI <small style="color:var(--text-muted); font-weight:400;">— v1.0 by Shiva Saini</small></span>
+        </button>
+    </div>
+
     <!-- ===== TOAST ===== -->
     <div class="toast" id="toast">
         <i class="fa-solid fa-circle-info"></i>
