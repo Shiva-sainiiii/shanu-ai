@@ -461,4 +461,24 @@ export async function clearSessionDB() {
     }
 }
 
+/**
+ * Log a thumbs up/down on a reply. Fire-and-forget — never blocks the UI,
+ * never throws into the caller. Just a signal for you to review later in
+ * the Firestore console under the "feedback" collection.
+ */
+export async function logFeedback(chatId, messageSnippet, rating) {
+    try {
+        const userId = getCurrentUserId();
+        await addDoc(collection(db, "feedback"), {
+            sessionId: userId,
+            chatId,
+            messageSnippet: (messageSnippet || "").slice(0, 300),
+            rating, // "up" | "down"
+            timestamp: serverTimestamp()
+        });
+    } catch (e) {
+        console.warn("Feedback log failed (non-critical):", e.message);
+    }
+}
+
 export { db, auth };
