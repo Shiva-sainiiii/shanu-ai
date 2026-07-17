@@ -16,6 +16,7 @@ import {
     getDocs,
     deleteDoc,
     doc,
+    setDoc,
     serverTimestamp
 } from "https://www.gstatic.com/firebasejs/12.12.1/firebase-firestore.js";
 import {
@@ -50,45 +51,114 @@ const auth = getAuth(app);
 //     rules issue), localStorage still has the real history
 // ==========================================
 
-const LS_KEY = "shanu_chat_history";
-const LS_MAX_MESSAGES = 60; // keep local cache bounded
+const LS_HISTORIES_KEY  = "shanu_chat_histories";   // { [chatId]: message[] }
+const LS_SESSIONS_KEY   = "shanu_chat_sessions";     // [{ chatId, title, updatedAt }] newest first
+const LS_ACTIVE_KEY     = "shanu_active_chat_id";
+const LS_MAX_MESSAGES   = 60;   // keep each chat's local cache bounded
+const LS_MAX_SESSIONS   = 30;   // keep the sidebar list bounded
 
-function getLocalHistory() {
+function getAllLocalHistories() {
     try {
-        const raw = localStorage.getItem(LS_KEY);
-        return raw ? JSON.parse(raw) : [];
+        const raw = localStorage.getItem(LS_HISTORIES_KEY);
+        return raw ? JSON.parse(raw) : {};
     } catch (e) {
         console.warn("LocalStorage read failed:", e.message);
-        return [];
+        return {};
     }
 }
 
-function saveLocalHistory(messages) {
+function saveAllLocalHistories(all) {
     try {
-        const trimmed = messages.slice(-LS_MAX_MESSAGES);
-        localStorage.setItem(LS_KEY, JSON.stringify(trimmed));
+        localStorage.setItem(LS_HISTORIES_KEY, JSON.stringify(all));
     } catch (e) {
-        // Likely quota exceeded — drop oldest half and retry once
-        console.warn("LocalStorage write failed, trimming:", e.message);
-        try {
-            const half = messages.slice(-Math.floor(LS_MAX_MESSAGES / 2));
-            localStorage.setItem(LS_KEY, JSON.stringify(half));
-        } catch (_) { /* give up silently — Firestore is still the source of truth */ }
+        console.warn("LocalStorage write failed:", e.message);
     }
 }
 
-function appendLocalMessage(role, content, meta = {}, seq = null) {
-    const history = getLocalHistory();
+function getLocalHistory(chatId) {
+    const all = getAllLocalHistories();
+    return all[chatId] || [];
+}
+
+function saveLocalHistory(chatId, messages) {
+    const all = getAllLocalHistories();
+    all[chatId] = messages.slice(-LS_MAX_MESSAGES);
+    saveAllLocalHistories(all);
+}
+
+function appendLocalMessage(chatId, role, content, meta = {}, seq = null) {
+    const history = getLocalHistory(chatId);
     const entry = { role, content, timestamp: Date.now(), seq: seq ?? (history.length + 1) };
     if (meta.displayLabel) entry.displayLabel = meta.displayLabel;
     if (meta.questionText) entry.questionText = meta.questionText;
     if (meta.fileThumbs && meta.fileThumbs.some(u => u)) entry.fileThumbs = meta.fileThumbs;
     history.push(entry);
-    saveLocalHistory(history);
+    saveLocalHistory(chatId, history);
 }
 
-function clearLocalHistory() {
-    try { localStorage.removeItem(LS_KEY); } catch (_) { /* ignore */ }
+function clearLocalHistory(chatId) {
+    const all = getAllLocalHistories();
+    delete all[chatId];
+    saveAllLocalHistories(all);
+}
+
+// ---- Session metadata (the sidebar list) ----
+function getLocalSessions() {
+    try {
+        const raw = localStorage.getItem(LS_SESSIONS_KEY);
+        return raw ? JSON.parse(raw) : [];
+    } catch (e) {
+        return [];
+    }
+}
+
+function upsertLocalSession(chatId, title) {
+    const sessions = getLocalSessions().filter(s => s.chatId !== chatId);
+    sessions.unshift({ chatId, title, updatedAt: Date.now() });
+    saveLocalSessions(sessions.slice(0, LS_MAX_SESSIONS));
+}
+
+function saveLocalSessions(sessions) {
+    try {
+        localStorage.setItem(LS_SESSIONS_KEY, JSON.stringify(sessions));
+    } catch (e) { /* ignore */ }
+}
+
+function removeLocalSession(chatId) {
+    saveLocalSessions(getLocalSessions().filter(s => s.chatId !== chatId));
+}
+
+// ---- Active chat pointer ----
+function makeChatId() {
+    return "chat_" + Date.now() + "_" + Math.random().toString(36).slice(2, 8);
+}
+
+export function getActiveChatId() {
+    let id = localStorage.getItem(LS_ACTIVE_KEY);
+    if (!id) {
+        id = makeChatId();
+        localStorage.setItem(LS_ACTIVE_KEY, id);
+    }
+    return id;
+}
+
+function setActiveChatId(id) {
+    localStorage.setItem(LS_ACTIVE_KEY, id);
+}
+
+/**
+ * Switch to a brand new, empty chat thread. Doesn't touch old data —
+ * the previous chat stays saved and reachable from the sidebar.
+ */
+export function startNewChatSession() {
+    const id = makeChatId();
+    setActiveChatId(id);
+    return id;
+}
+
+/** Point the active chat at an existing thread (user tapped it in the sidebar). */
+export function switchActiveChatId(chatId) {
+    setActiveChatId(chatId);
 }
 
 // ==========================================
@@ -176,10 +246,16 @@ let localSeqCounter = 0;
  *                       thumbnails can be restored after a refresh
  */
 export async function saveMessageToDB(role, content, meta = {}) {
+    const chatId = getActiveChatId();
     const seq = ++localSeqCounter;
 
     // ── Write-through: localStorage first (instant, never fails silently) ──
-    appendLocalMessage(role, content, meta, seq);
+    appendLocalMessage(chatId, role, content, meta, seq);
+
+    // Title the session after the first user message (only set once)
+    const existingMeta = getLocalSessions().find(s => s.chatId === chatId);
+    const title = existingMeta?.title || (role === "user" ? content.slice(0, 60) : "New chat");
+    upsertLocalSession(chatId, title);
 
     try {
         const userId    = getCurrentUserId();
@@ -189,6 +265,7 @@ export async function saveMessageToDB(role, content, meta = {}) {
 
         const docData = {
             sessionId: userId,          // Strict per-user isolation
+            chatId,                      // Which conversation thread this belongs to
             role,
             content:   safeContent,
             seq,                         // Tie-breaker for stable ordering
@@ -199,6 +276,16 @@ export async function saveMessageToDB(role, content, meta = {}) {
         if (meta.fileThumbs && meta.fileThumbs.some(u => u)) docData.fileThumbs = meta.fileThumbs;
 
         await addDoc(collection(db, "chats"), docData);
+
+        // Upsert the session doc — one per chatId, powers the sidebar list
+        // across devices. merge:true so we never clobber an existing title.
+        await setDoc(doc(db, "chatSessions", chatId), {
+            sessionId: userId,
+            chatId,
+            title,
+            updatedAt: serverTimestamp()
+        }, { merge: true });
+
     } catch (e) {
         console.warn("Firestore Save Warning (localStorage backup still saved):", e.message);
     }
@@ -208,13 +295,14 @@ export async function saveMessageToDB(role, content, meta = {}) {
  * Load ordered chat history for the current authenticated user.
  * Uses composite index: (sessionId, timestamp ASC).
  */
-export async function loadHistoryFromDB(limitCount = 30) {
+export async function loadHistoryFromDB(chatId, limitCount = 60) {
     try {
         const userId = getCurrentUserId();
 
         const q = query(
             collection(db, "chats"),
             where("sessionId", "==", userId),   // Strict userId filter — no mixed chats
+            where("chatId", "==", chatId),       // Only this conversation thread
             orderBy("timestamp", "asc"),         // Chronological order
             limit(limitCount)
         );
@@ -236,10 +324,11 @@ export async function loadHistoryFromDB(limitCount = 30) {
 
         if (messages.length > 0) {
             // Firestore is source of truth when reachable — refresh local
-            // cache. Keep seq/displayLabel/questionText/fileThumbs —
-            // dropping them here previously meant every reload after this
-            // one lost the extra fields even though Firestore still had them.
-            saveLocalHistory(messages.map(m => ({
+            // cache for this chatId. Keep seq/displayLabel/questionText/
+            // fileThumbs — dropping them here previously meant every reload
+            // after this one lost the extra fields even though Firestore
+            // still had them.
+            saveLocalHistory(chatId, messages.map(m => ({
                 role:         m.role,
                 content:      m.content,
                 timestamp:    Date.now(),
@@ -251,9 +340,9 @@ export async function loadHistoryFromDB(limitCount = 30) {
             return messages;
         }
 
-        // Firestore reachable but empty (new user, or index just built) —
+        // Firestore reachable but empty (new chat, or index just built) —
         // fall back to local cache in case it has anything Firestore missed
-        return getLocalHistory();
+        return getLocalHistory(chatId);
 
     } catch (e) {
         if (e.code === "failed-precondition" || e.message?.includes("index")) {
@@ -266,7 +355,69 @@ export async function loadHistoryFromDB(limitCount = 30) {
         } else {
             console.error("Firestore Load Error (using localStorage backup):", e);
         }
-        return getLocalHistory();
+        return getLocalHistory(chatId);
+    }
+}
+
+/**
+ * List this user's chat threads for the sidebar, newest first.
+ * Falls back to the local session cache if Firestore is unreachable.
+ */
+export async function listChatSessions(limitCount = 30) {
+    try {
+        const userId = getCurrentUserId();
+        const q = query(
+            collection(db, "chatSessions"),
+            where("sessionId", "==", userId),
+            orderBy("updatedAt", "desc"),
+            limit(limitCount)
+        );
+        const snapshot = await getDocs(q);
+        const sessions = [];
+        snapshot.forEach(d => sessions.push(d.data()));
+
+        if (sessions.length > 0) {
+            saveLocalSessions(sessions.map(s => ({
+                chatId: s.chatId, title: s.title, updatedAt: Date.now()
+            })));
+            return sessions;
+        }
+        return getLocalSessions();
+    } catch (e) {
+        if (e.code === "failed-precondition" || e.message?.includes("index")) {
+            console.warn(
+                "⚠️ Firestore composite index missing for chatSessions.\n" +
+                "Click the link in the error above to auto-create it (one-time)."
+            );
+        } else {
+            console.warn("Session list load failed, using local cache:", e.message);
+        }
+        return getLocalSessions();
+    }
+}
+
+/** Instant, synchronous read of the cached session list (for first paint). */
+export function listChatSessionsSync() {
+    return getLocalSessions();
+}
+
+/** Delete one chat thread (all its messages + its sidebar entry). */
+export async function deleteChatSession(chatId) {
+    clearLocalHistory(chatId);
+    removeLocalSession(chatId);
+    try {
+        const userId = getCurrentUserId();
+        const q = query(
+            collection(db, "chats"),
+            where("sessionId", "==", userId),
+            where("chatId", "==", chatId)
+        );
+        const snapshot = await getDocs(q);
+        const deletions = snapshot.docs.map(d => deleteDoc(doc(db, "chats", d.id)));
+        deletions.push(deleteDoc(doc(db, "chatSessions", chatId)));
+        await Promise.all(deletions);
+    } catch (e) {
+        console.error("Firestore session delete error:", e);
     }
 }
 
@@ -275,27 +426,37 @@ export async function loadHistoryFromDB(limitCount = 30) {
  * Use this to render history immediately on page load, before Firestore
  * has even started its round-trip.
  */
-export function loadLocalHistorySync() {
-    return getLocalHistory();
+export function loadLocalHistorySync(chatId) {
+    return getLocalHistory(chatId);
 }
 
 /**
  * Delete all messages for the current user and reload the app.
  */
+/**
+ * Delete ALL chat threads for the current user (nuclear option — this is
+ * the "Clear all chat history" action, distinct from deleteChatSession()
+ * which removes just one thread from the sidebar).
+ */
 export async function clearSessionDB() {
-    clearLocalHistory();
+    try { localStorage.removeItem(LS_HISTORIES_KEY); } catch (_) {}
+    try { localStorage.removeItem(LS_SESSIONS_KEY); } catch (_) {}
     try {
         const userId = getCurrentUserId();
-        const q = query(
-            collection(db, "chats"),
-            where("sessionId", "==", userId)
-        );
-        const snapshot = await getDocs(q);
-        const deletions = snapshot.docs.map(d => deleteDoc(doc(db, "chats", d.id)));
-        await Promise.all(deletions);
+
+        const msgQ = query(collection(db, "chats"), where("sessionId", "==", userId));
+        const msgSnap = await getDocs(msgQ);
+        const msgDeletions = msgSnap.docs.map(d => deleteDoc(doc(db, "chats", d.id)));
+
+        const sessQ = query(collection(db, "chatSessions"), where("sessionId", "==", userId));
+        const sessSnap = await getDocs(sessQ);
+        const sessDeletions = sessSnap.docs.map(d => deleteDoc(doc(db, "chatSessions", d.id)));
+
+        await Promise.all([...msgDeletions, ...sessDeletions]);
     } catch (e) {
         console.error("Firestore Clear Error:", e);
     } finally {
+        startNewChatSession();
         location.reload();
     }
 }
