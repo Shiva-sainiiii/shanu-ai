@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>404 — Page Not Found | Shanu AI</title>
+<meta name="robots" content="noindex, follow">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,400;0,600;0,700;0,800;1,400&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg-dark: #06080E;
+    --primary: #00E5FF;
+    --primary-glow: rgba(0, 229, 255, 0.45);
+    --text-main: #F0F4FF;
+    --text-sub: #9CA3AF;
+    --glass-bg: rgba(14, 20, 34, 0.65);
+    --glass-border: rgba(255, 255, 255, 0.07);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    height: 100%;
+    background-color: var(--bg-dark);
+    color: var(--text-main);
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    -webkit-font-smoothing: antialiased;
+    overflow: hidden;
+  }
+  body {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    padding: 24px;
+    text-align: center;
+  }
+  .bg-blobs { position: fixed; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; }
+  .blob {
+    position: absolute;
+    border-radius: 50%;
+    filter: blur(90px);
+    opacity: 0.35;
+    animation: float 12s ease-in-out infinite;
+  }
+  .blob-1 { width: 380px; height: 380px; background: var(--primary); top: -100px; left: -100px; }
+  .blob-2 { width: 320px; height: 320px; background: #6366f1; bottom: -100px; right: -80px; animation-delay: -4s; }
+  @keyframes float {
+    0%, 100% { transform: translate(0, 0) scale(1); }
+    50% { transform: translate(30px, -20px) scale(1.08); }
+  }
+  .noise-overlay {
+    position: fixed; inset: 0; z-index: 1; pointer-events: none; opacity: 0.025;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    background-size: 128px 128px;
+  }
+  .card {
+    position: relative;
+    z-index: 2;
+    max-width: 440px;
+    width: 100%;
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    border-radius: 24px;
+    padding: 48px 32px;
+    backdrop-filter: blur(20px);
+    box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+  }
+  .glow-num {
+    font-size: 84px;
+    font-weight: 800;
+    line-height: 1;
+    background: linear-gradient(135deg, var(--primary) 0%, #6366f1 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    text-shadow: 0 0 60px var(--primary-glow);
+    letter-spacing: -2px;
+  }
+  .card h1 {
+    margin-top: 16px;
+    font-size: 20px;
+    font-weight: 700;
+  }
+  .card p {
+    margin-top: 10px;
+    color: var(--text-sub);
+    font-size: 14.5px;
+    line-height: 1.6;
+  }
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 28px;
+    padding: 13px 28px;
+    border-radius: 14px;
+    background: linear-gradient(135deg, #00D4F5 0%, #0062FF 100%);
+    color: #06080E;
+    font-weight: 700;
+    font-size: 14.5px;
+    text-decoration: none;
+    box-shadow: 0 8px 24px rgba(0, 229, 255, 0.25);
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+  }
+  .btn:active { transform: scale(0.97); }
+  .footer-note {
+    margin-top: 22px;
+    font-size: 12px;
+    color: #6B7280;
+  }
+</style>
+</head>
+<body>
+
+  <div class="bg-blobs">
+    <div class="blob blob-1"></div>
+    <div class="blob blob-2"></div>
+  </div>
+  <div class="noise-overlay"></div>
+
+  <div class="card">
+    <div class="glow-num">404</div>
+    <h1>Yeh page nahi mila</h1>
+    <p>Jis page ko aap dhoondh rahe hain woh maujood nahi hai ya move ho chuka hai. Chalo wapas chalte hain.</p>
+    <a href="/" class="btn">← Shanu AI par wapas jaayein</a>
+    <div class="footer-note">Shanu AI · Developed by Shiva Saini</div>
+  </div>
+
+</body>
+</html>
