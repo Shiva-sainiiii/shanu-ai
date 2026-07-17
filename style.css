@@ -859,6 +859,15 @@ body {
 
 .pill i { font-size: 10px; }
 
+.about-blurb {
+    margin: 22px auto 0;
+    max-width: 400px;
+    font-size: 12px;
+    line-height: 1.65;
+    color: var(--text-muted);
+    opacity: 0.85;
+}
+
 /* ========== MESSAGE BUBBLES ========== */
 .msg {
     max-width: 76%;
