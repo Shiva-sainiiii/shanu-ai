@@ -22,7 +22,8 @@
 import {
     saveMessageToDB, loadHistoryFromDB, clearSessionDB, initAuth, waitForAuth, loadLocalHistorySync,
     getActiveChatId, startNewChatSession, switchActiveChatId,
-    listChatSessions, listChatSessionsSync, deleteChatSession, logFeedback
+    listChatSessions, listChatSessionsSync, deleteChatSession, logFeedback,
+    signInWithGoogle, signOutUser, getUserProfile, onAuthChange
 } from './firebase.js';
 
 // ------------------------------------------
@@ -1904,6 +1905,54 @@ newChatBtn.addEventListener("click", () => {
     sidebarOverlay.classList.remove("show");
     refreshChatSessionsList();
 });
+
+// ------------------------------------------
+// 23a. Profile Row (optional Google sign-in)
+// ------------------------------------------
+const profileRow    = document.getElementById("profileRow");
+const profileAvatar = document.getElementById("profileAvatar");
+const profileName   = document.getElementById("profileName");
+const profileSub    = document.getElementById("profileSub");
+
+function renderProfileUI() {
+    const p = getUserProfile();
+    if (p.isAnonymous) {
+        profileAvatar.innerHTML = '<i class="fa-solid fa-user"></i>';
+        profileName.textContent = "Guest";
+        profileSub.textContent  = "Tap to sign in with Google";
+    } else {
+        profileAvatar.innerHTML = p.photoURL
+            ? `<img src="${p.photoURL}" alt="">`
+            : (p.displayName?.[0]?.toUpperCase() || "U");
+        profileName.textContent = p.displayName || p.email || "Signed in";
+        profileSub.textContent  = "Tap to sign out";
+    }
+}
+
+profileRow.addEventListener("click", async () => {
+    const p = getUserProfile();
+    if (p.isAnonymous) {
+        showToast("🔐 Opening Google sign-in...");
+        try {
+            // Redirects the page to Google — chat history stays intact,
+            // this device's anonymous account gets linked, not replaced.
+            await signInWithGoogle();
+        } catch (e) {
+            console.error("Google sign-in error:", e);
+            showToast("❌ Sign-in failed, try again");
+        }
+    } else {
+        if (!confirm(`Sign out of ${p.displayName || "this account"}? Aap guest ke roop mein chat continue kar sakte ho.`)) return;
+        await signOutUser();
+        renderProfileUI();
+        showToast("👋 Signed out");
+    }
+});
+
+// Keep the sidebar avatar in sync with real auth state (fires after the
+// Google redirect completes, and on any future sign-in/out).
+onAuthChange(() => renderProfileUI());
+renderProfileUI(); // instant paint before auth settles
 
 // ------------------------------------------
 // 23b. Settings Sheet
