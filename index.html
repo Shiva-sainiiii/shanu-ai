@@ -127,12 +127,23 @@
             </nav>
 
             <div class="sidebar-footer">
-                <button class="icon-btn" title="Settings" id="settingsBtn">
-                    <i class="fa-solid fa-gear"></i>
+                <button class="profile-row" id="profileRow" type="button">
+                    <span class="profile-avatar" id="profileAvatar">
+                        <i class="fa-solid fa-user"></i>
+                    </span>
+                    <span class="profile-info">
+                        <span class="profile-name" id="profileName">Guest</span>
+                        <span class="profile-sub" id="profileSub">Tap to sign in with Google</span>
+                    </span>
                 </button>
-                <button class="icon-btn" id="clearBtn" title="Clear History">
-                    <i class="fa-solid fa-trash-can"></i>
-                </button>
+                <div class="sidebar-footer-icons">
+                    <button class="icon-btn" title="Settings" id="settingsBtn">
+                        <i class="fa-solid fa-gear"></i>
+                    </button>
+                    <button class="icon-btn" id="clearBtn" title="Clear History">
+                        <i class="fa-solid fa-trash-can"></i>
+                    </button>
+                </div>
             </div>
         </aside>
 
