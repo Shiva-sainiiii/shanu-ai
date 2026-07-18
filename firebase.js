@@ -24,17 +24,24 @@ import {
     signInAnonymously,
     onAuthStateChanged,
     GoogleAuthProvider,
-    signInWithRedirect,
-    getRedirectResult,
-    linkWithRedirect,
+    signInWithPopup,
+    linkWithPopup,
     signInWithCredential,
-    signOut
+    signOut,
+    EmailAuthProvider,
+    linkWithCredential,
+    createUserWithEmailAndPassword,
+    signInWithEmailAndPassword,
+    RecaptchaVerifier,
+    signInWithPhoneNumber,
+    linkWithPhoneNumber,
+    PhoneAuthProvider
 } from "https://www.gstatic.com/firebasejs/12.12.1/firebase-auth.js";
 
 // ---- Firebase Config ----
 const firebaseConfig = {
     apiKey:            "AIzaSyCBAQgLhVaNcH1YS_qldqKTJ9Kg-JO9A74",
-    authDomain:        "shanu-ai-iota.vercel.app",
+    authDomain:        "shanu-ai.firebaseapp.com",
     projectId:         "shanu-ai",
     storageBucket:     "shanu-ai.firebasestorage.app",
     messagingSenderId: "225114447873",
@@ -175,33 +182,10 @@ const googleProvider = new GoogleAuthProvider();
 
 /**
  * Trigger anonymous sign-in if not already authenticated.
- * Also resolves a pending Google redirect (see signInWithGoogle below) —
- * this MUST run before we check auth.currentUser, since that's what
- * actually finalizes the sign-in/link after returning from Google.
  * Safe to call multiple times — idempotent.
  * @returns {Promise<User>}
  */
 export async function initAuth() {
-    try {
-        await getRedirectResult(auth);
-    } catch (e) {
-        if (e.code === "auth/credential-already-in-use") {
-            // This Google account is already tied to a DIFFERENT existing
-            // Firebase user (e.g. they linked it on another device first).
-            // Sign into that original account instead of failing silently —
-            // otherwise the user taps "Sign in with Google" and nothing
-            // visibly happens, which is worse than landing on older history.
-            try {
-                const cred = GoogleAuthProvider.credentialFromError(e);
-                if (cred) await signInWithCredential(auth, cred);
-            } catch (inner) {
-                console.warn("Fallback sign-in after link conflict failed:", inner.message);
-            }
-        } else if (e.code && e.code !== "auth/no-auth-event") {
-            console.warn("Google redirect result error:", e.message);
-        }
-    }
-
     if (auth.currentUser) return auth.currentUser;
     try {
         const credential = await signInAnonymously(auth);
@@ -220,14 +204,47 @@ export async function initAuth() {
  * of replacing it, so every chat already saved on this device stays
  * attached to the same uid and carries over rather than disappearing.
  *
- * Uses redirect rather than a popup — popups are unreliable inside
- * mobile browser chrome, redirect works everywhere.
+ * Uses a popup, not a redirect. Redirect requires a `/__/auth/handler`
+ * page that only exists on the default *.firebaseapp.com authDomain —
+ * pointing authDomain at a custom domain (to dodge mobile Chrome's
+ * storage-partitioning bug) breaks redirect entirely since that path
+ * 404s on Vercel. Popup sidesteps both problems: no persisted
+ * cross-navigation state, no dependency on a hosted handler page.
+ *
+ * @returns {Promise<{success: boolean, reason?: string}>}
  */
 export async function signInWithGoogle() {
-    if (auth.currentUser?.isAnonymous) {
-        return linkWithRedirect(auth.currentUser, googleProvider);
+    try {
+        if (auth.currentUser?.isAnonymous) {
+            await linkWithPopup(auth.currentUser, googleProvider);
+        } else {
+            await signInWithPopup(auth, googleProvider);
+        }
+        return { success: true };
+    } catch (e) {
+        if (e.code === "auth/popup-closed-by-user" || e.code === "auth/cancelled-popup-request") {
+            return { success: false, reason: "cancelled" };
+        }
+        if (e.code === "auth/credential-already-in-use") {
+            // This Google account is already tied to a DIFFERENT existing
+            // Firebase user (e.g. linked from another device first). Sign
+            // into that original account instead of failing silently —
+            // the user lands on their real history rather than nothing.
+            try {
+                const cred = GoogleAuthProvider.credentialFromError(e);
+                if (cred) await signInWithCredential(auth, cred);
+                return { success: true };
+            } catch (inner) {
+                console.warn("Fallback sign-in after link conflict failed:", inner.message);
+                return { success: false, reason: "conflict" };
+            }
+        }
+        if (e.code === "auth/popup-blocked") {
+            return { success: false, reason: "blocked" };
+        }
+        console.error("Google sign-in error:", e.code, e.message);
+        return { success: false, reason: "error" };
     }
-    return signInWithRedirect(auth, googleProvider);
 }
 
 /**
@@ -244,17 +261,111 @@ export async function signOutUser() {
     }
 }
 
+/** Human-readable messages for the auth error codes users actually hit. */
+function mapAuthError(code) {
+    const map = {
+        "auth/invalid-email":         "That email doesn't look right.",
+        "auth/weak-password":         "Password should be at least 6 characters.",
+        "auth/wrong-password":        "Wrong password.",
+        "auth/invalid-credential":    "Email or password is incorrect.",
+        "auth/user-not-found":        "No account found with that email.",
+        "auth/too-many-requests":     "Too many attempts — try again in a bit.",
+        "auth/invalid-phone-number":  "That phone number doesn't look right. Include country code, e.g. +91...",
+        "auth/invalid-verification-code": "Wrong OTP code.",
+        "auth/code-expired":          "OTP expired — request a new one.",
+        "auth/quota-exceeded":        "SMS limit reached for today — try again tomorrow.",
+        "auth/network-request-failed": "Network error — check your connection."
+    };
+    return map[code] || "Something went wrong — try again.";
+}
+
+/**
+ * Continue with email + password. One button, smart behind the scenes:
+ *  - Anonymous session -> links this email to the existing uid (keeps
+ *    all current chats) unless that email is already a real account,
+ *    in which case it logs into that existing account instead.
+ *  - No anonymous session -> tries to create an account, falls back to
+ *    signing in if one already exists.
+ */
+export async function continueWithEmail(email, password) {
+    try {
+        if (auth.currentUser?.isAnonymous) {
+            const cred = EmailAuthProvider.credential(email, password);
+            await linkWithCredential(auth.currentUser, cred);
+            return { success: true };
+        }
+        await createUserWithEmailAndPassword(auth, email, password);
+        return { success: true };
+    } catch (e) {
+        if (e.code === "auth/email-already-in-use") {
+            try {
+                await signInWithEmailAndPassword(auth, email, password);
+                return { success: true };
+            } catch (inner) {
+                return { success: false, reason: mapAuthError(inner.code) };
+            }
+        }
+        return { success: false, reason: mapAuthError(e.code) };
+    }
+}
+
+/**
+ * Create (once) an invisible reCAPTCHA bound to a DOM element — required
+ * by Firebase before it will send an SMS. Call once, reuse the instance.
+ */
+export function createRecaptchaVerifier(elementId) {
+    return new RecaptchaVerifier(auth, elementId, { size: "invisible" });
+}
+
+/**
+ * Send an OTP to a phone number (E.164 format, e.g. +919876543210).
+ * Returns the confirmationResult needed by verifyPhoneOTP — hang onto it.
+ * Free-tier Firebase caps this at 10 SMS/day project-wide.
+ */
+export async function sendPhoneOTP(phoneNumber, verifier) {
+    try {
+        const confirmationResult = auth.currentUser?.isAnonymous
+            ? await linkWithPhoneNumber(auth.currentUser, phoneNumber, verifier)
+            : await signInWithPhoneNumber(auth, phoneNumber, verifier);
+        return { success: true, confirmationResult };
+    } catch (e) {
+        return { success: false, reason: mapAuthError(e.code) };
+    }
+}
+
+/** Verify the OTP code the user typed in, completing phone sign-in/link. */
+export async function verifyPhoneOTP(confirmationResult, code) {
+    try {
+        await confirmationResult.confirm(code);
+        return { success: true };
+    } catch (e) {
+        if (e.code === "auth/credential-already-in-use") {
+            // This phone number already belongs to a different existing
+            // account — sign into that one instead of a dead-end error.
+            try {
+                const cred = PhoneAuthProvider.credentialFromError(e);
+                if (cred) await signInWithCredential(auth, cred);
+                return { success: true };
+            } catch (inner) {
+                return { success: false, reason: mapAuthError(inner.code) };
+            }
+        }
+        return { success: false, reason: mapAuthError(e.code) };
+    }
+}
+
 /** Lightweight profile snapshot for rendering the sidebar avatar/name. */
 export function getUserProfile() {
     const u = auth.currentUser;
     if (!u || u.isAnonymous) {
-        return { isAnonymous: true, displayName: null, photoURL: null, email: null };
+        return { isAnonymous: true, displayName: null, photoURL: null, email: null, phoneNumber: null };
     }
     return {
         isAnonymous: false,
         displayName: u.displayName,
         photoURL: u.photoURL,
-        email: u.email
+        email: u.email,
+        phoneNumber: u.phoneNumber
     };
 }
 
