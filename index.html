@@ -370,6 +370,69 @@
         </button>
     </div>
 
+    <!-- ===== SIGN-IN SHEET ===== -->
+    <div class="plus-sheet-backdrop" id="authBackdrop"></div>
+    <div class="plus-sheet" id="authSheet">
+        <div class="plus-sheet-handle"></div>
+        <div class="plus-sheet-header">
+            <span id="authSheetTitle">Sign in to Shanu AI</span>
+            <button class="plus-sheet-close" id="authClose"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+
+        <!-- View: method picker -->
+        <div class="auth-view" id="authViewMethods">
+            <button class="auth-method-btn" id="authGoogleBtn">
+                <i class="fa-brands fa-google"></i> Continue with Google
+            </button>
+            <button class="auth-method-btn" id="authEmailMethodBtn">
+                <i class="fa-solid fa-envelope"></i> Continue with Email
+            </button>
+            <button class="auth-method-btn" id="authPhoneMethodBtn">
+                <i class="fa-solid fa-phone"></i> Continue with Phone
+            </button>
+            <p class="auth-note">Sign-in is optional — chatting works fine as a guest too. Aapki current chat history sign-in ke baad bhi safe rahegi.</p>
+        </div>
+
+        <!-- View: email form -->
+        <div class="auth-view" id="authViewEmail" style="display:none;">
+            <button class="auth-back-btn" id="authEmailBack"><i class="fa-solid fa-arrow-left"></i> Back</button>
+            <input type="email" id="authEmailInput" class="auth-input" placeholder="Email address" autocomplete="email">
+            <input type="password" id="authPasswordInput" class="auth-input" placeholder="Password (min 6 characters)" autocomplete="current-password">
+            <button class="auth-submit-btn" id="authEmailSubmit">Continue</button>
+            <p class="auth-error" id="authEmailError"></p>
+        </div>
+
+        <!-- View: phone number entry -->
+        <div class="auth-view" id="authViewPhone" style="display:none;">
+            <button class="auth-back-btn" id="authPhoneBack"><i class="fa-solid fa-arrow-left"></i> Back</button>
+            <input type="tel" id="authPhoneInput" class="auth-input" placeholder="+91 98765 43210" autocomplete="tel">
+            <button class="auth-submit-btn" id="authPhoneSendOtp">Send OTP</button>
+            <p class="auth-error" id="authPhoneError"></p>
+            <div id="recaptchaContainer"></div>
+        </div>
+
+        <!-- View: OTP entry -->
+        <div class="auth-view" id="authViewOtp" style="display:none;">
+            <button class="auth-back-btn" id="authOtpBack"><i class="fa-solid fa-arrow-left"></i> Back</button>
+            <p class="auth-note" id="authOtpSentTo"></p>
+            <input type="text" id="authOtpInput" class="auth-input" placeholder="6-digit code" inputmode="numeric" maxlength="6">
+            <button class="auth-submit-btn" id="authOtpSubmit">Verify</button>
+            <p class="auth-error" id="authOtpError"></p>
+        </div>
+
+        <!-- View: signed-in account info -->
+        <div class="auth-view" id="authViewAccount" style="display:none;">
+            <div class="auth-account-info">
+                <span class="profile-avatar" id="authAccountAvatar"><i class="fa-solid fa-user"></i></span>
+                <div class="profile-info">
+                    <div class="profile-name" id="authAccountName"></div>
+                    <div class="profile-sub" id="authAccountSub"></div>
+                </div>
+            </div>
+            <button class="auth-submit-btn auth-signout-btn" id="authSignOutBtn">Sign out</button>
+        </div>
+    </div>
+
     <!-- ===== TOAST ===== -->
     <div class="toast" id="toast">
         <i class="fa-solid fa-circle-info"></i>
