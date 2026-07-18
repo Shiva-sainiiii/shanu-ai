@@ -34,7 +34,7 @@ import {
 // ---- Firebase Config ----
 const firebaseConfig = {
     apiKey:            "AIzaSyCBAQgLhVaNcH1YS_qldqKTJ9Kg-JO9A74",
-    authDomain:        "shanu-ai.firebaseapp.com",
+    authDomain:        "shanu-ai-iota.vercel.app",
     projectId:         "shanu-ai",
     storageBucket:     "shanu-ai.firebasestorage.app",
     messagingSenderId: "225114447873",
