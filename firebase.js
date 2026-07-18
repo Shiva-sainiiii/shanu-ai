@@ -22,7 +22,13 @@ import {
 import {
     getAuth,
     signInAnonymously,
-    onAuthStateChanged
+    onAuthStateChanged,
+    GoogleAuthProvider,
+    signInWithRedirect,
+    getRedirectResult,
+    linkWithRedirect,
+    signInWithCredential,
+    signOut
 } from "https://www.gstatic.com/firebasejs/12.12.1/firebase-auth.js";
 
 // ---- Firebase Config ----
@@ -165,12 +171,37 @@ export function switchActiveChatId(chatId) {
 // Auth Helpers
 // ==========================================
 
+const googleProvider = new GoogleAuthProvider();
+
 /**
  * Trigger anonymous sign-in if not already authenticated.
+ * Also resolves a pending Google redirect (see signInWithGoogle below) —
+ * this MUST run before we check auth.currentUser, since that's what
+ * actually finalizes the sign-in/link after returning from Google.
  * Safe to call multiple times — idempotent.
  * @returns {Promise<User>}
  */
 export async function initAuth() {
+    try {
+        await getRedirectResult(auth);
+    } catch (e) {
+        if (e.code === "auth/credential-already-in-use") {
+            // This Google account is already tied to a DIFFERENT existing
+            // Firebase user (e.g. they linked it on another device first).
+            // Sign into that original account instead of failing silently —
+            // otherwise the user taps "Sign in with Google" and nothing
+            // visibly happens, which is worse than landing on older history.
+            try {
+                const cred = GoogleAuthProvider.credentialFromError(e);
+                if (cred) await signInWithCredential(auth, cred);
+            } catch (inner) {
+                console.warn("Fallback sign-in after link conflict failed:", inner.message);
+            }
+        } else if (e.code && e.code !== "auth/no-auth-event") {
+            console.warn("Google redirect result error:", e.message);
+        }
+    }
+
     if (auth.currentUser) return auth.currentUser;
     try {
         const credential = await signInAnonymously(auth);
@@ -179,6 +210,57 @@ export async function initAuth() {
         console.warn("⚠️ Anonymous auth failed:", e.message);
         return null;
     }
+}
+
+/**
+ * Start Google sign-in. Optional — the app works fully without this.
+ *
+ * If the current session is anonymous (the default, no-signup state),
+ * this LINKS the Google account to the existing anonymous user instead
+ * of replacing it, so every chat already saved on this device stays
+ * attached to the same uid and carries over rather than disappearing.
+ *
+ * Uses redirect rather than a popup — popups are unreliable inside
+ * mobile browser chrome, redirect works everywhere.
+ */
+export async function signInWithGoogle() {
+    if (auth.currentUser?.isAnonymous) {
+        return linkWithRedirect(auth.currentUser, googleProvider);
+    }
+    return signInWithRedirect(auth, googleProvider);
+}
+
+/**
+ * Sign out of Google and drop back into a fresh anonymous session so the
+ * app stays usable — signing out is never a dead end.
+ */
+export async function signOutUser() {
+    try {
+        await signOut(auth);
+    } catch (e) {
+        console.error("Sign-out error:", e.message);
+    } finally {
+        await signInAnonymously(auth);
+    }
+}
+
+/** Lightweight profile snapshot for rendering the sidebar avatar/name. */
+export function getUserProfile() {
+    const u = auth.currentUser;
+    if (!u || u.isAnonymous) {
+        return { isAnonymous: true, displayName: null, photoURL: null, email: null };
+    }
+    return {
+        isAnonymous: false,
+        displayName: u.displayName,
+        photoURL: u.photoURL,
+        email: u.email
+    };
+}
+
+/** Subscribe to auth/profile changes (e.g. to refresh the sidebar UI live). */
+export function onAuthChange(callback) {
+    return onAuthStateChanged(auth, callback);
 }
 
 /**
