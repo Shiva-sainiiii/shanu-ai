@@ -420,15 +420,23 @@
             <p class="auth-error" id="authOtpError"></p>
         </div>
 
-        <!-- View: signed-in account info -->
+        <!-- View: editable profile -->
         <div class="auth-view" id="authViewAccount" style="display:none;">
             <div class="auth-account-info">
-                <span class="profile-avatar" id="authAccountAvatar"><i class="fa-solid fa-user"></i></span>
+                <button class="profile-avatar profile-avatar-edit" id="authAccountAvatarBtn" title="Change photo">
+                    <span id="authAccountAvatar"><i class="fa-solid fa-user"></i></span>
+                    <span class="avatar-edit-badge"><i class="fa-solid fa-camera"></i></span>
+                </button>
+                <input type="file" id="authAvatarFileInput" accept="image/*" style="display:none;">
                 <div class="profile-info">
-                    <div class="profile-name" id="authAccountName"></div>
                     <div class="profile-sub" id="authAccountSub"></div>
                 </div>
             </div>
+
+            <input type="text" id="authNameInput" class="auth-input" placeholder="Your name" maxlength="40">
+            <button class="auth-submit-btn" id="authNameSave">Save name</button>
+            <p class="auth-error" id="authProfileError"></p>
+
             <button class="auth-submit-btn auth-signout-btn" id="authSignOutBtn">Sign out</button>
         </div>
     </div>
