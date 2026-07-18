@@ -23,7 +23,8 @@ import {
     saveMessageToDB, loadHistoryFromDB, clearSessionDB, initAuth, waitForAuth, loadLocalHistorySync,
     getActiveChatId, startNewChatSession, switchActiveChatId,
     listChatSessions, listChatSessionsSync, deleteChatSession, logFeedback,
-    signInWithGoogle, signOutUser, getUserProfile, onAuthChange
+    signInWithGoogle, signOutUser, getUserProfile, onAuthChange,
+    continueWithEmail, createRecaptchaVerifier, sendPhoneOTP, verifyPhoneOTP
 } from './firebase.js';
 
 // ------------------------------------------
@@ -1907,7 +1908,7 @@ newChatBtn.addEventListener("click", () => {
 });
 
 // ------------------------------------------
-// 23a. Profile Row (optional Google sign-in)
+// 23a. Profile Row + Sign-in Sheet
 // ------------------------------------------
 const profileRow    = document.getElementById("profileRow");
 const profileAvatar = document.getElementById("profileAvatar");
@@ -1919,38 +1920,188 @@ function renderProfileUI() {
     if (p.isAnonymous) {
         profileAvatar.innerHTML = '<i class="fa-solid fa-user"></i>';
         profileName.textContent = "Guest";
-        profileSub.textContent  = "Tap to sign in with Google";
+        profileSub.textContent  = "Tap to sign in";
     } else {
         profileAvatar.innerHTML = p.photoURL
             ? `<img src="${p.photoURL}" alt="">`
-            : (p.displayName?.[0]?.toUpperCase() || "U");
-        profileName.textContent = p.displayName || p.email || "Signed in";
-        profileSub.textContent  = "Tap to sign out";
+            : (p.displayName?.[0]?.toUpperCase() || p.email?.[0]?.toUpperCase() || "U");
+        profileName.textContent = p.displayName || p.email || p.phoneNumber || "Signed in";
+        profileSub.textContent  = "Tap for account";
     }
 }
 
-profileRow.addEventListener("click", async () => {
+// ---- Sheet elements ----
+const authBackdrop   = document.getElementById("authBackdrop");
+const authSheet      = document.getElementById("authSheet");
+const authClose      = document.getElementById("authClose");
+const authSheetTitle = document.getElementById("authSheetTitle");
+
+const authViewMethods = document.getElementById("authViewMethods");
+const authViewEmail   = document.getElementById("authViewEmail");
+const authViewPhone   = document.getElementById("authViewPhone");
+const authViewOtp     = document.getElementById("authViewOtp");
+const authViewAccount = document.getElementById("authViewAccount");
+const allAuthViews    = [authViewMethods, authViewEmail, authViewPhone, authViewOtp, authViewAccount];
+
+function showAuthView(view, title) {
+    allAuthViews.forEach(v => v.style.display = (v === view ? "flex" : "none"));
+    authSheetTitle.textContent = title;
+}
+
+function openAuthSheet() {
     const p = getUserProfile();
     if (p.isAnonymous) {
-        showToast("🔐 Opening Google sign-in...");
-        try {
-            // Redirects the page to Google — chat history stays intact,
-            // this device's anonymous account gets linked, not replaced.
-            await signInWithGoogle();
-        } catch (e) {
-            console.error("Google sign-in error:", e);
-            showToast("❌ Sign-in failed, try again");
-        }
+        showAuthView(authViewMethods, "Sign in to Shanu AI");
     } else {
-        if (!confirm(`Sign out of ${p.displayName || "this account"}? Aap guest ke roop mein chat continue kar sakte ho.`)) return;
-        await signOutUser();
-        renderProfileUI();
-        showToast("👋 Signed out");
+        document.getElementById("authAccountAvatar").innerHTML = profileAvatar.innerHTML;
+        document.getElementById("authAccountName").textContent = p.displayName || p.email || p.phoneNumber || "Signed in";
+        document.getElementById("authAccountSub").textContent  = p.email || p.phoneNumber || "";
+        showAuthView(authViewAccount, "Your account");
+    }
+    authBackdrop.classList.add("show");
+    authSheet.classList.add("show");
+}
+
+function closeAuthSheet() {
+    authBackdrop.classList.remove("show");
+    authSheet.classList.remove("show");
+    // Clear sensitive fields on close
+    document.getElementById("authPasswordInput").value = "";
+    document.getElementById("authEmailError").textContent = "";
+    document.getElementById("authPhoneError").textContent = "";
+    document.getElementById("authOtpError").textContent = "";
+}
+
+profileRow.addEventListener("click", openAuthSheet);
+authClose.addEventListener("click", closeAuthSheet);
+authBackdrop.addEventListener("click", closeAuthSheet);
+
+function onAuthSuccess(label) {
+    renderProfileUI();
+    showToast(`✅ ${label}`);
+    refreshChatSessionsList();
+    closeAuthSheet();
+}
+
+// ---- Google ----
+document.getElementById("authGoogleBtn").addEventListener("click", async () => {
+    const result = await signInWithGoogle();
+    if (result.success) {
+        const fresh = getUserProfile();
+        onAuthSuccess(`Signed in as ${fresh.displayName || fresh.email || "your Google account"}`);
+    } else if (result.reason === "cancelled") {
+        // no-op — user closed the popup
+    } else if (result.reason === "blocked") {
+        showToast("⚠️ Popup blocked — allow popups for this site and try again");
+    } else {
+        showToast("❌ Google sign-in failed, try again");
     }
 });
 
-// Keep the sidebar avatar in sync with real auth state (fires after the
-// Google redirect completes, and on any future sign-in/out).
+// ---- Email ----
+document.getElementById("authEmailMethodBtn").addEventListener("click", () => {
+    showAuthView(authViewEmail, "Continue with email");
+});
+document.getElementById("authEmailBack").addEventListener("click", () => {
+    showAuthView(authViewMethods, "Sign in to Shanu AI");
+});
+document.getElementById("authEmailSubmit").addEventListener("click", async function () {
+    const email    = document.getElementById("authEmailInput").value.trim();
+    const password = document.getElementById("authPasswordInput").value;
+    const errorEl  = document.getElementById("authEmailError");
+    errorEl.textContent = "";
+
+    if (!email || !password) { errorEl.textContent = "Email aur password dono fill karein."; return; }
+    if (password.length < 6) { errorEl.textContent = "Password kam se kam 6 characters ka ho."; return; }
+
+    this.disabled = true; this.textContent = "Please wait...";
+    const result = await continueWithEmail(email, password);
+    this.disabled = false; this.textContent = "Continue";
+
+    if (result.success) {
+        const fresh = getUserProfile();
+        onAuthSuccess(`Signed in as ${fresh.email}`);
+    } else {
+        errorEl.textContent = result.reason;
+    }
+});
+
+// ---- Phone ----
+let recaptchaVerifier   = null;
+let phoneConfirmResult  = null;
+
+function getRecaptcha() {
+    if (!recaptchaVerifier) recaptchaVerifier = createRecaptchaVerifier("recaptchaContainer");
+    return recaptchaVerifier;
+}
+
+document.getElementById("authPhoneMethodBtn").addEventListener("click", () => {
+    showAuthView(authViewPhone, "Continue with phone");
+});
+document.getElementById("authPhoneBack").addEventListener("click", () => {
+    showAuthView(authViewMethods, "Sign in to Shanu AI");
+});
+document.getElementById("authPhoneSendOtp").addEventListener("click", async function () {
+    const phoneInput = document.getElementById("authPhoneInput");
+    const errorEl     = document.getElementById("authPhoneError");
+    let phone = phoneInput.value.trim().replace(/[\s-]/g, "");
+    errorEl.textContent = "";
+
+    if (!phone.startsWith("+")) { errorEl.textContent = "Country code ke saath likhein, jaise +91XXXXXXXXXX"; return; }
+    if (!/^\+\d{8,15}$/.test(phone)) { errorEl.textContent = "Valid phone number nahi lag raha."; return; }
+
+    this.disabled = true; this.textContent = "Sending...";
+    const result = await sendPhoneOTP(phone, getRecaptcha());
+    this.disabled = false; this.textContent = "Send OTP";
+
+    if (result.success) {
+        phoneConfirmResult = result.confirmationResult;
+        document.getElementById("authOtpSentTo").textContent = `OTP bhej diya ${phone} par.`;
+        document.getElementById("authOtpInput").value = "";
+        document.getElementById("authOtpError").textContent = "";
+        showAuthView(authViewOtp, "Enter OTP");
+    } else {
+        errorEl.textContent = result.reason;
+        // A failed attempt can invalidate the widget — reset for the next try
+        try { recaptchaVerifier?.clear(); } catch (_) {}
+        recaptchaVerifier = null;
+    }
+});
+
+document.getElementById("authOtpBack").addEventListener("click", () => {
+    showAuthView(authViewPhone, "Continue with phone");
+});
+document.getElementById("authOtpSubmit").addEventListener("click", async function () {
+    const code    = document.getElementById("authOtpInput").value.trim();
+    const errorEl = document.getElementById("authOtpError");
+    errorEl.textContent = "";
+
+    if (!/^\d{6}$/.test(code)) { errorEl.textContent = "6-digit code daalein."; return; }
+    if (!phoneConfirmResult) { errorEl.textContent = "OTP session expire ho gaya, dobara try karein."; return; }
+
+    this.disabled = true; this.textContent = "Verifying...";
+    const result = await verifyPhoneOTP(phoneConfirmResult, code);
+    this.disabled = false; this.textContent = "Verify";
+
+    if (result.success) {
+        const fresh = getUserProfile();
+        onAuthSuccess(`Signed in as ${fresh.phoneNumber}`);
+    } else {
+        errorEl.textContent = result.reason;
+    }
+});
+
+// ---- Sign out (from the account view) ----
+document.getElementById("authSignOutBtn").addEventListener("click", async () => {
+    const p = getUserProfile();
+    if (!confirm(`Sign out of ${p.displayName || p.email || p.phoneNumber || "this account"}? Aap guest ke roop mein chat continue kar sakte ho.`)) return;
+    await signOutUser();
+    renderProfileUI();
+    showToast("👋 Signed out");
+    closeAuthSheet();
+});
+
+// Keep the sidebar avatar in sync with real auth state.
 onAuthChange(() => renderProfileUI());
 renderProfileUI(); // instant paint before auth settles
 
