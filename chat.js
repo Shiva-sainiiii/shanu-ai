@@ -24,7 +24,8 @@ import {
     getActiveChatId, startNewChatSession, switchActiveChatId,
     listChatSessions, listChatSessionsSync, deleteChatSession, logFeedback,
     signInWithGoogle, signOutUser, getUserProfile, onAuthChange,
-    continueWithEmail, createRecaptchaVerifier, sendPhoneOTP, verifyPhoneOTP
+    continueWithEmail, createRecaptchaVerifier, sendPhoneOTP, verifyPhoneOTP,
+    updateDisplayName, updateProfilePhoto, getCustomProfilePhoto
 } from './firebase.js';
 
 // ------------------------------------------
@@ -1915,19 +1916,29 @@ const profileAvatar = document.getElementById("profileAvatar");
 const profileName   = document.getElementById("profileName");
 const profileSub    = document.getElementById("profileSub");
 
+function avatarInnerHTML(photoURL, fallbackLetter) {
+    return photoURL ? `<img src="${photoURL}" alt="">` : (fallbackLetter || "U");
+}
+
 function renderProfileUI() {
     const p = getUserProfile();
     if (p.isAnonymous) {
         profileAvatar.innerHTML = '<i class="fa-solid fa-user"></i>';
         profileName.textContent = "Guest";
         profileSub.textContent  = "Tap to sign in";
-    } else {
-        profileAvatar.innerHTML = p.photoURL
-            ? `<img src="${p.photoURL}" alt="">`
-            : (p.displayName?.[0]?.toUpperCase() || p.email?.[0]?.toUpperCase() || "U");
-        profileName.textContent = p.displayName || p.email || p.phoneNumber || "Signed in";
-        profileSub.textContent  = "Tap for account";
+        return;
     }
+
+    const letter = p.displayName?.[0]?.toUpperCase() || p.email?.[0]?.toUpperCase() || "U";
+    profileAvatar.innerHTML = avatarInnerHTML(p.photoURL, letter);
+    profileName.textContent = p.displayName || p.email || p.phoneNumber || "Signed in";
+    profileSub.textContent  = "Tap for account";
+
+    // Upgrade to a custom-uploaded photo if the user set one — async,
+    // doesn't block the instant sync paint above.
+    getCustomProfilePhoto().then(dataUrl => {
+        if (dataUrl) profileAvatar.innerHTML = `<img src="${dataUrl}" alt="">`;
+    });
 }
 
 // ---- Sheet elements ----
@@ -1943,6 +1954,11 @@ const authViewOtp     = document.getElementById("authViewOtp");
 const authViewAccount = document.getElementById("authViewAccount");
 const allAuthViews    = [authViewMethods, authViewEmail, authViewPhone, authViewOtp, authViewAccount];
 
+const authAccountAvatar = document.getElementById("authAccountAvatar");
+const authNameInput     = document.getElementById("authNameInput");
+const authAccountSub    = document.getElementById("authAccountSub");
+const authProfileError  = document.getElementById("authProfileError");
+
 function showAuthView(view, title) {
     allAuthViews.forEach(v => v.style.display = (v === view ? "flex" : "none"));
     authSheetTitle.textContent = title;
@@ -1953,10 +1969,16 @@ function openAuthSheet() {
     if (p.isAnonymous) {
         showAuthView(authViewMethods, "Sign in to Shanu AI");
     } else {
-        document.getElementById("authAccountAvatar").innerHTML = profileAvatar.innerHTML;
-        document.getElementById("authAccountName").textContent = p.displayName || p.email || p.phoneNumber || "Signed in";
-        document.getElementById("authAccountSub").textContent  = p.email || p.phoneNumber || "";
-        showAuthView(authViewAccount, "Your account");
+        const letter = p.displayName?.[0]?.toUpperCase() || p.email?.[0]?.toUpperCase() || "U";
+        authAccountAvatar.innerHTML = avatarInnerHTML(p.photoURL, letter);
+        authNameInput.value      = p.displayName || "";
+        authAccountSub.textContent = p.email || p.phoneNumber || "";
+        authProfileError.textContent = "";
+        showAuthView(authViewAccount, "Your profile");
+
+        getCustomProfilePhoto().then(dataUrl => {
+            if (dataUrl) authAccountAvatar.innerHTML = `<img src="${dataUrl}" alt="">`;
+        });
     }
     authBackdrop.classList.add("show");
     authSheet.classList.add("show");
@@ -2088,6 +2110,80 @@ document.getElementById("authOtpSubmit").addEventListener("click", async functio
         onAuthSuccess(`Signed in as ${fresh.phoneNumber}`);
     } else {
         errorEl.textContent = result.reason;
+    }
+});
+
+// ---- Profile editing: avatar upload + name save ----
+document.getElementById("authAccountAvatarBtn").addEventListener("click", () => {
+    document.getElementById("authAvatarFileInput").click();
+});
+
+document.getElementById("authAvatarFileInput").addEventListener("change", async function () {
+    const file = this.files?.[0];
+    this.value = ""; // allow re-picking the same file later
+    if (!file) return;
+    if (!file.type.startsWith("image/")) { authProfileError.textContent = "Please choose an image file."; return; }
+
+    authProfileError.textContent = "";
+    authAccountAvatar.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+
+    try {
+        // Resize to a small square before storing — keeps it well under
+        // Firestore's 1MB doc limit and fast to load everywhere it's shown.
+        const dataUrl = await resizeImageToDataUrl(file, 160, 0.75);
+        const result = await updateProfilePhoto(dataUrl);
+        if (result.success) {
+            authAccountAvatar.innerHTML = `<img src="${dataUrl}" alt="">`;
+            profileAvatar.innerHTML = `<img src="${dataUrl}" alt="">`;
+            showToast("✅ Profile photo updated");
+        } else {
+            authProfileError.textContent = result.reason;
+            renderProfileUI(); // restore whatever avatar was there before
+        }
+    } catch (err) {
+        console.error("Avatar processing error:", err);
+        authProfileError.textContent = "Photo process nahi ho payi, try a different image.";
+        renderProfileUI();
+    }
+});
+
+/** Downscale + compress an image file client-side, return a JPEG data URL. */
+function resizeImageToDataUrl(file, maxSize, quality) {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        const reader = new FileReader();
+        reader.onerror = () => reject(new Error("File read failed"));
+        reader.onload = () => {
+            img.onerror = () => reject(new Error("Image decode failed"));
+            img.onload = () => {
+                const scale = Math.min(1, maxSize / Math.max(img.width, img.height));
+                const w = Math.round(img.width * scale);
+                const h = Math.round(img.height * scale);
+                const canvas = document.createElement("canvas");
+                canvas.width = w; canvas.height = h;
+                canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+                resolve(canvas.toDataURL("image/jpeg", quality));
+            };
+            img.src = reader.result;
+        };
+        reader.readAsDataURL(file);
+    });
+}
+
+document.getElementById("authNameSave").addEventListener("click", async function () {
+    const name = authNameInput.value.trim();
+    authProfileError.textContent = "";
+    if (!name) { authProfileError.textContent = "Naam khali nahi ho sakta."; return; }
+
+    this.disabled = true; this.textContent = "Saving...";
+    const result = await updateDisplayName(name);
+    this.disabled = false; this.textContent = "Save name";
+
+    if (result.success) {
+        renderProfileUI();
+        showToast("✅ Name updated");
+    } else {
+        authProfileError.textContent = result.reason;
     }
 });
 
