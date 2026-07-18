@@ -2140,8 +2140,18 @@ async function initChat() {
     //    If Firestore has MORE messages than local (e.g. different device,
     //    or local cache was cleared), re-render the full authoritative set.
     try {
-        await initAuth();      // Trigger anonymous sign-in
+        await initAuth();      // Trigger anonymous sign-in / resolve pending Google redirect
         await waitForAuth();   // Block until auth state settles
+
+        // Visible confirmation that a Google sign-in/link just completed —
+        // useful on mobile where there's no easy way to check the console.
+        const profile = getUserProfile();
+        if (!profile.isAnonymous && sessionStorage.getItem("shanu_google_link_toast") !== "shown") {
+            sessionStorage.setItem("shanu_google_link_toast", "shown");
+            showToast(`✅ Signed in as ${profile.displayName || profile.email}`);
+        }
+        renderProfileUI();
+
         const history = await loadHistoryFromDB(chatId, 60);
 
         if (history.length > renderedCount) {
