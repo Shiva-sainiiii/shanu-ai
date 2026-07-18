@@ -14,6 +14,7 @@ import {
     orderBy,
     limit,
     getDocs,
+    getDoc,
     deleteDoc,
     doc,
     setDoc,
@@ -35,7 +36,8 @@ import {
     RecaptchaVerifier,
     signInWithPhoneNumber,
     linkWithPhoneNumber,
-    PhoneAuthProvider
+    PhoneAuthProvider,
+    updateProfile
 } from "https://www.gstatic.com/firebasejs/12.12.1/firebase-auth.js";
 
 // ---- Firebase Config ----
@@ -220,6 +222,7 @@ export async function signInWithGoogle() {
         } else {
             await signInWithPopup(auth, googleProvider);
         }
+        await syncProviderProfileToUser();
         return { success: true };
     } catch (e) {
         if (e.code === "auth/popup-closed-by-user" || e.code === "auth/cancelled-popup-request") {
@@ -233,6 +236,7 @@ export async function signInWithGoogle() {
             try {
                 const cred = GoogleAuthProvider.credentialFromError(e);
                 if (cred) await signInWithCredential(auth, cred);
+                await syncProviderProfileToUser();
                 return { success: true };
             } catch (inner) {
                 console.warn("Fallback sign-in after link conflict failed:", inner.message);
@@ -360,13 +364,86 @@ export function getUserProfile() {
     if (!u || u.isAnonymous) {
         return { isAnonymous: true, displayName: null, photoURL: null, email: null, phoneNumber: null };
     }
+    // When a Google account gets LINKED to an existing anonymous user,
+    // Firebase doesn't auto-copy the provider's name/photo to the
+    // top-level user object — it only lives in providerData. Fall back
+    // to it here so the UI shows the real name/photo either way.
+    const provider = u.providerData?.[0];
     return {
         isAnonymous: false,
-        displayName: u.displayName,
-        photoURL: u.photoURL,
-        email: u.email,
-        phoneNumber: u.phoneNumber
+        displayName: u.displayName || provider?.displayName || null,
+        photoURL:    u.photoURL    || provider?.photoURL    || null,
+        email:       u.email       || provider?.email       || null,
+        phoneNumber: u.phoneNumber || provider?.phoneNumber || null
     };
+}
+
+/**
+ * Copies the sign-in provider's name/photo up to the main user profile,
+ * so auth.currentUser.displayName/photoURL are correct everywhere (not
+ * just through the providerData fallback above). Cheap, safe to call
+ * after every sign-in — no-ops if there's nothing new to copy.
+ */
+async function syncProviderProfileToUser() {
+    const u = auth.currentUser;
+    if (!u) return;
+    const provider = u.providerData?.[0];
+    if (!provider) return;
+    const needsName  = !u.displayName && provider.displayName;
+    const needsPhoto = !u.photoURL && provider.photoURL;
+    if (needsName || needsPhoto) {
+        try {
+            await updateProfile(u, {
+                displayName: u.displayName || provider.displayName || undefined,
+                photoURL:    u.photoURL    || provider.photoURL    || undefined
+            });
+        } catch (e) {
+            console.warn("Profile sync failed (non-critical):", e.message);
+        }
+    }
+}
+
+/** Let the user set their own display name (works for any sign-in method). */
+export async function updateDisplayName(name) {
+    try {
+        await updateProfile(auth.currentUser, { displayName: name });
+        return { success: true };
+    } catch (e) {
+        return { success: false, reason: "Naam save nahi ho paya, try again." };
+    }
+}
+
+/**
+ * Save a custom profile photo. Stored in Firestore (not Firebase Auth's
+ * photoURL, which isn't meant for inline image data) as a small,
+ * pre-compressed base64 JPEG — the caller is expected to resize/compress
+ * client-side before calling this (keeps it well under Firestore's 1MB
+ * document limit and fast to load).
+ */
+export async function updateProfilePhoto(dataUrl) {
+    try {
+        const userId = getCurrentUserId();
+        await setDoc(doc(db, "userProfiles", userId), {
+            photoDataUrl: dataUrl,
+            updatedAt: serverTimestamp()
+        }, { merge: true });
+        return { success: true };
+    } catch (e) {
+        console.error("Profile photo save error:", e);
+        return { success: false, reason: "Photo save nahi ho payi, try again." };
+    }
+}
+
+/** Fetch the custom Firestore-stored profile photo, if the user set one. */
+export async function getCustomProfilePhoto() {
+    try {
+        const userId = getCurrentUserId();
+        const snap = await getDoc(doc(db, "userProfiles", userId));
+        return snap.exists() ? (snap.data().photoDataUrl || null) : null;
+    } catch (e) {
+        console.warn("Custom photo fetch failed:", e.message);
+        return null;
+    }
 }
 
 /** Subscribe to auth/profile changes (e.g. to refresh the sidebar UI live). */
