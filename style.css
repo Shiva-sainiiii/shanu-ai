@@ -434,6 +434,30 @@ body.reduce-motion * { animation-duration: 0.01ms !important; transition-duratio
     font-size: 16px;
 }
 
+.profile-avatar-edit,
+.auth-account-info .profile-avatar-edit {
+    position: relative;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    width: 64px; height: 64px;
+    font-size: 22px;
+}
+
+.avatar-edit-badge {
+    position: absolute;
+    bottom: -2px; right: -2px;
+    width: 22px; height: 22px;
+    background: var(--primary);
+    color: #06080E;
+    border: 2px solid #0e1422;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+}
+
 .sidebar-footer {
     padding: 10px 12px 14px;
     border-top: 1px solid var(--glass-border);
