@@ -1172,12 +1172,20 @@ body.reduce-motion * { animation-duration: 0.01ms !important; transition-duratio
 }
 
 .msg.bot {
-    align-self: flex-start;
-    background: var(--bot-msg);
-    border: 1px solid var(--glass-border);
-    border-bottom-left-radius: 4px;
-    backdrop-filter: blur(12px);
-    box-shadow: var(--shadow-sm);
+    /* Full-width plain response — matches ChatGPT/Claude/Gemini, where only
+       the user's own messages are bubbles and AI replies flow edge-to-edge
+       as plain text. Overrides the base .msg card look (padding/radius/bg)
+       from the rule above — specificity (.msg.bot > .msg) keeps this intact
+       even under the mobile max-width overrides further down. */
+    align-self: stretch;
+    width: 100%;
+    max-width: 100%;
+    background: transparent;
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+    backdrop-filter: none;
+    padding: 4px 0 18px;
     /* No white-space: pre-wrap — markdown handles line breaks */
 }
 
