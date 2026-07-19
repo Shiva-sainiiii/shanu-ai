@@ -686,7 +686,7 @@ async function addMessage(text, type = "bot", actionMode = "live") {
                 card.querySelector(".regen-btn").addEventListener("click", async function () {
                     this.disabled = true;
                     this.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Working...';
-                    const result = isPdf ? generatePDF(indicator.content) : await generatePPT(indicator.content);
+                    const result = isPdf ? await generatePDF(indicator.content) : await generatePPT(indicator.content);
                     if (!result) {
                         this.disabled = false;
                         this.innerHTML = '<i class="fa-solid fa-rotate"></i> Regenerate';
@@ -845,7 +845,7 @@ async function parseAndExecuteActions(rawText, mode = "live") {
         text = text.replace(pdfMatch[0], "").trim();
         const content = pdfMatch[1].trim();
         if (mode === "live") {
-            const result = generatePDF(content);
+            const result = await generatePDF(content);
             if (result) indicator = { type: "pdf", ...result };
         } else {
             // History replay — don't generate a blob now, just offer a
@@ -916,57 +916,115 @@ async function parseAndExecuteActions(rawText, mode = "live") {
 }
 
 // ------------------------------------------
-// 11. PDF Generator — Enhanced jsPDF
 // ------------------------------------------
-function generatePDF(content) {
+// 11. PDF Generator — Markdown → html2canvas → jsPDF
+// ------------------------------------------
+//    REPLACED the old raw-text jsPDF renderer (doc.splitTextToSize +
+//    manual line-by-line doc.text calls). That approach produced ugly,
+//    unevenly-spaced output because jsPDF's built-in text layout is
+//    crude — no real markdown support, and it forced a hardcoded black
+//    "Shanu AI" header band onto every PDF whether the user wanted
+//    branding or not.
+//
+//    This version ports the same technique used in the user's own
+//    standalone markdown.html tool: render the content as real HTML via
+//    marked.js in an offscreen div, snapshot it at high resolution with
+//    html2canvas, then slice that image across A4 pages in jsPDF. This
+//    gives proper typography — real headings, bold/italic, bullet and
+//    numbered lists, tables, blockquotes — and a clean plain document
+//    with no forced branding.
+async function generatePDF(content) {
     try {
         const { jsPDF } = window.jspdf;
-        if (!jsPDF) { showToast("⚠️ jsPDF not loaded yet. Try again."); return null; }
+        if (!jsPDF)        { showToast("⚠️ jsPDF not loaded yet. Try again.");        return null; }
+        if (!window.html2canvas) { showToast("⚠️ PDF renderer not loaded yet. Try again."); return null; }
+        if (!window.marked) { showToast("⚠️ Markdown renderer not loaded yet. Try again."); return null; }
 
-        const doc    = new jsPDF({ unit: "mm", format: "a4" });
-        const pageW  = doc.internal.pageSize.getWidth();
-        const margin = 15;
-        const useW   = pageW - margin * 2;
+        // A4 at 96dpi, matching the markdown.html tool's page-dimension table
+        const dim = { w: 794, h: 1123, jW: 210, jH: 297 };
 
-        // Header band
-        doc.setFillColor(6, 8, 14);
-        doc.rect(0, 0, pageW, 24, "F");
-        doc.setTextColor(0, 229, 255);
-        doc.setFontSize(15);
-        doc.setFont("helvetica", "bold");
-        doc.text("Shanu AI", margin, 15);
-        doc.setTextColor(120, 130, 145);
-        doc.setFontSize(8.5);
-        doc.setFont("helvetica", "normal");
-        doc.text(`Generated: ${new Date().toLocaleString()}`, pageW - margin, 15, { align: "right" });
+        // Offscreen render container — built fresh each time, removed after
+        const renderEl = document.createElement("div");
+        renderEl.style.cssText = `
+            position: fixed;
+            top: -99999px;
+            left: 0;
+            width: ${dim.w}px;
+            padding: 48px 56px;
+            background: #ffffff;
+            color: #1a1a24;
+            font-family: Georgia, 'Times New Roman', serif;
+            font-size: 15px;
+            line-height: 1.7;
+            box-sizing: border-box;
+        `;
+        renderEl.innerHTML = marked.parse(content);
 
-        // Body
-        doc.setTextColor(25, 25, 35);
-        doc.setFontSize(11);
-        let y = 33;
+        // Light, print-friendly styling for the rendered markdown elements
+        const style = document.createElement("style");
+        style.textContent = `
+            .pdf-render-scope h1 { font-size: 26px; margin: 0 0 18px; color: #0d1b2a; }
+            .pdf-render-scope h2 { font-size: 20px; margin: 28px 0 12px; color: #0d1b2a; border-bottom: 1px solid #d8dce2; padding-bottom: 6px; }
+            .pdf-render-scope h3 { font-size: 16px; margin: 20px 0 8px; color: #0d1b2a; }
+            .pdf-render-scope p  { margin: 0 0 14px; }
+            .pdf-render-scope ul, .pdf-render-scope ol { margin: 0 0 14px; padding-left: 24px; }
+            .pdf-render-scope li { margin-bottom: 6px; }
+            .pdf-render-scope strong { color: #0d1b2a; }
+            .pdf-render-scope blockquote { margin: 0 0 14px; padding: 8px 16px; border-left: 3px solid #0F62D6; background: #f4f6fa; color: #333; }
+            .pdf-render-scope table { border-collapse: collapse; width: 100%; margin: 0 0 16px; font-size: 13px; }
+            .pdf-render-scope th, .pdf-render-scope td { border: 1px solid #d8dce2; padding: 8px 10px; text-align: left; }
+            .pdf-render-scope th { background: #f0f2f6; }
+            .pdf-render-scope code { background: #f0f2f6; padding: 2px 5px; border-radius: 3px; font-family: 'DM Mono', monospace; font-size: 0.9em; }
+            .pdf-render-scope pre { background: #1a1a24; color: #e8e8f0; padding: 14px; border-radius: 6px; overflow-x: auto; margin: 0 0 14px; }
+            .pdf-render-scope pre code { background: none; padding: 0; color: inherit; }
+            .pdf-render-scope hr { border: none; border-top: 1px solid #d8dce2; margin: 20px 0; }
+        `;
+        renderEl.classList.add("pdf-render-scope");
+        document.head.appendChild(style);
+        document.body.appendChild(renderEl);
 
-        const lines = doc.splitTextToSize(content, useW);
-        lines.forEach(line => {
-            if (y > 282) { doc.addPage(); y = 18; }
-            const isHeading = line.trim().endsWith(":") || /^[A-Z\s]{6,}$/.test(line.trim());
-            if (isHeading) {
-                doc.setFont("helvetica", "bold");
-                doc.setTextColor(0, 100, 180);
-            } else {
-                doc.setFont("helvetica", "normal");
-                doc.setTextColor(25, 25, 35);
-            }
-            doc.text(line, margin, y);
-            y += 6.5;
-        });
+        let canvas;
+        try {
+            // Let fonts/layout settle before the snapshot
+            await new Promise(r => setTimeout(r, 120));
 
-        // Footer page numbers
+            canvas = await html2canvas(renderEl, {
+                scale: 2,
+                useCORS: true,
+                backgroundColor: "#ffffff",
+                width: dim.w,
+                windowWidth: dim.w
+            });
+        } finally {
+            renderEl.remove();
+            style.remove();
+        }
+
+        const doc = new jsPDF({ unit: "mm", format: "a4" });
+        const imgData   = canvas.toDataURL("image/jpeg", 0.95);
+        const imgWidth   = dim.jW;
+        const imgHeight  = (canvas.height * imgWidth) / canvas.width;
+        const pageHeight = dim.jH;
+
+        let yPos = 0;
+        let remainingHeight = imgHeight;
+        let firstPage = true;
+
+        while (remainingHeight > 0) {
+            if (!firstPage) doc.addPage();
+            firstPage = false;
+            doc.addImage(imgData, "JPEG", 0, -yPos, imgWidth, imgHeight);
+            yPos += pageHeight;
+            remainingHeight -= pageHeight;
+        }
+
+        // Subtle page-number footer only — no forced logo/branding band
         const total = doc.internal.getNumberOfPages();
         for (let i = 1; i <= total; i++) {
             doc.setPage(i);
             doc.setFontSize(8);
             doc.setTextColor(160);
-            doc.text(`${i} / ${total}`, pageW / 2, 292, { align: "center" });
+            doc.text(`${i} / ${total}`, dim.jW / 2, dim.jH - 8, { align: "center" });
         }
 
         // ── No auto-download. Return a blob URL so the chat can show a
