@@ -648,7 +648,21 @@ async function addMessage(text, type = "bot", actionMode = "live") {
         //    buttons, Preview gets a Reopen button. These stay clickable
         //    forever (not a one-time toast), because the blob URL / html
         //    is captured in this closure, one per message. ──
-        if (indicator) {
+        //
+        //    Chart is handled separately just below — it's the actual
+        //    inline visualization (canvas), not a small pill card like
+        //    the others, so it doesn't go through the `card` branch.
+        if (indicator && indicator.type === "chart") {
+            // Awaited (not the old fire-and-forget setTimeout) so that
+            // renderHistorySequentially()'s for-loop — which awaits each
+            // message in turn to preserve chronological order — doesn't
+            // move on to the next history message before this chart is
+            // actually in the DOM. Placed here, right after chatBox
+            // already has the text bubble (`div`, appended just above),
+            // so live chat keeps its original visual order too: reply
+            // text first, chart right below it.
+            await generateChart(indicator.json);
+        } else if (indicator) {
             const card = document.createElement("div");
             card.className = "action-result-pill action-result-card";
 
@@ -837,7 +851,7 @@ function addFileBubbles() {
 // ------------------------------------------
 async function parseAndExecuteActions(rawText, mode = "live") {
     let text      = rawText;
-    let indicator = null; // { type: "pdf"|"ppt"|"preview", ...data }
+    let indicator = null; // { type: "pdf"|"ppt"|"pdf-history"|"ppt-history"|"chart"|"preview"|"image-history", ...data }
 
     // [PDF]...[/PDF]
     const pdfMatch = text.match(/\[PDF\]([\s\S]*?)\[\/PDF\]/i);
@@ -871,9 +885,26 @@ async function parseAndExecuteActions(rawText, mode = "live") {
     const chartMatch = text.match(/\[CHART\]([\s\S]*?)\[\/CHART\]/i);
     if (chartMatch) {
         text = text.replace(chartMatch[0], "").trim();
-        // Safe to render in both modes — chart is a pure inline display,
-        // no download/popup side effect.
-        setTimeout(() => generateChart(chartMatch[1].trim()), 120);
+        // Don't render here — just hand the JSON up via indicator. Two
+        // bugs, one fix:
+        //  1) This used to fire the actual chatBox.appendChild() via a
+        //     bare `setTimeout(..., 120)` — fire-and-forget. That broke
+        //     history replay: renderHistorySequentially()'s for-loop
+        //     awaits each message to preserve order, but this returned
+        //     instantly while the real DOM insertion happened 120ms
+        //     later, after later history messages were already appended
+        //     — so the chart always landed at the very bottom instead of
+        //     its real chronological spot.
+        //  2) Simply awaiting generateChart() here (so history stays in
+        //     order) would then append the chart BEFORE the bot's own
+        //     text bubble, since this whole action-parsing step runs
+        //     before addMessage() appends `div` — flipping the visual
+        //     order the other way (chart above the reply text instead
+        //     of below it).
+        // Passing the chart data up through `indicator` and appending it
+        // in addMessage() — right after the text bubble, same place the
+        // PDF/PPT/Preview cards already go — fixes both at once.
+        indicator = { type: "chart", json: chartMatch[1].trim() };
     }
 
     // [PREVIEW]html[/PREVIEW]
@@ -1215,7 +1246,7 @@ function loadPollinationsImage(wrap, uid, prompt, seed) {
 // ------------------------------------------
 // 13. Chart Generator — Chart.js
 // ------------------------------------------
-function generateChart(jsonStr) {
+async function generateChart(jsonStr) {
     try {
         if (typeof Chart === "undefined") { showToast("⚠️ Chart.js not loaded yet."); return; }
 
