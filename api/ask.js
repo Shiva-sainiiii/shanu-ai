@@ -93,7 +93,7 @@ export default async function handler(req, res) {
 
     try {
         const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
-        const { messages, mood, webSearch } = body || {};
+        const { messages, mood, webSearch, stream } = body || {};
 
         if (!messages || !Array.isArray(messages))
             return res.status(400).json({ reply: "Messages array missing 🧐" });
@@ -124,7 +124,106 @@ export default async function handler(req, res) {
             }
         }
 
-        // ── OpenRouter API Call ───────────────────────────────
+        const openRouterBody = {
+            model:       "nvidia/nemotron-3-nano-30b-a3b:free",
+            messages: [
+                { role: "system", content: systemPrompt },
+                ...outgoingMessages
+            ],
+            temperature: 0.82,
+            max_tokens:  1200,   // Increased for action tags (PPT JSON can be large)
+            top_p:       0.95
+        };
+
+        // ══════════════════════════════════════════════════════
+        // STREAMING PATH — live token-by-token response (SSE)
+        // ══════════════════════════════════════════════════════
+        // Requested by the client via { stream: true }. We ask OpenRouter
+        // for its own SSE stream, then re-emit each text delta to our
+        // client as-is over a Server-Sent Events response. This gives the
+        // ChatGPT/Claude-style "typing live" visual instead of waiting for
+        // the full reply and showing dots. The client is responsible for
+        // buffering the full text and running parseAndExecuteActions()
+        // on it ONCE the stream ends (action tags like [CHART]/[PDF] need
+        // the complete text — they can't be parsed from partial chunks).
+        if (stream) {
+            res.writeHead(200, {
+                "Content-Type":      "text/event-stream",
+                "Cache-Control":     "no-cache, no-transform",
+                "Connection":        "keep-alive",
+                "X-Accel-Buffering": "no" // disable proxy buffering (nginx/vercel edge)
+            });
+
+            const send = (event, data) => {
+                res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+            };
+
+            try {
+                const upstream = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+                    method: "POST",
+                    headers: {
+                        "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
+                        "Content-Type":  "application/json",
+                        "HTTP-Referer":  "https://shanu-ai.vercel.app",
+                        "X-Title":       "Shanu AI"
+                    },
+                    body: JSON.stringify({ ...openRouterBody, stream: true })
+                });
+
+                if (!upstream.ok || !upstream.body) {
+                    const errText = await upstream.text().catch(() => "");
+                    console.error("OpenRouter stream error:", upstream.status, errText);
+                    send("error", { message: "AI ne jawab dene se mana kar diya 😅 Try again!" });
+                    return res.end();
+                }
+
+                const reader  = upstream.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer   = "";
+                let fullText = "";
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split("\n");
+                    buffer = lines.pop(); // keep last partial line for next chunk
+
+                    for (const line of lines) {
+                        const trimmed = line.trim();
+                        if (!trimmed.startsWith("data:")) continue;
+                        const payload = trimmed.slice(5).trim();
+                        if (payload === "[DONE]") continue;
+
+                        try {
+                            const json  = JSON.parse(payload);
+                            const delta = json?.choices?.[0]?.delta?.content;
+                            if (delta) {
+                                fullText += delta;
+                                send("delta", { text: delta });
+                            }
+                        } catch {
+                            // Ignore partial/malformed SSE fragments — the
+                            // next chunk read usually completes them.
+                        }
+                    }
+                }
+
+                const finalReply = fullText.trim() || "Hmm... samajh nahi aaya 🤔";
+                send("done", { reply: finalReply });
+                return res.end();
+
+            } catch (err) {
+                console.error("Streaming Server Error:", err);
+                send("error", { message: "Backend me kuch fat gaya 💥 Please try again." });
+                return res.end();
+            }
+        }
+
+        // ══════════════════════════════════════════════════════
+        // NON-STREAMING PATH — original behavior (unchanged)
+        // ══════════════════════════════════════════════════════
         const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
             method: "POST",
             headers: {
@@ -133,16 +232,7 @@ export default async function handler(req, res) {
                 "HTTP-Referer":  "https://shanu-ai.vercel.app",
                 "X-Title":       "Shanu AI"
             },
-            body: JSON.stringify({
-                model:       "nvidia/nemotron-3-nano-30b-a3b:free",
-                messages: [
-                    { role: "system", content: systemPrompt },
-                    ...outgoingMessages
-                ],
-                temperature: 0.82,
-                max_tokens:  1200,   // Increased for action tags (PPT JSON can be large)
-                top_p:       0.95
-            })
+            body: JSON.stringify(openRouterBody)
         });
 
         const data = await response.json();
