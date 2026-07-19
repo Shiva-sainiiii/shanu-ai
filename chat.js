@@ -412,10 +412,24 @@ sidebarOverlay?.addEventListener("click", () => {
 function resizeInput() {
     inputBox.style.height = "auto";
     inputBox.style.height = Math.min(inputBox.scrollHeight, 130) + "px";
+    // Growing the textarea shrinks .chat-display (flex:1) below it — keep
+    // the last message pinned in view instead of letting it hide behind
+    // the taller input bar as the user types a multi-line message.
+    scrollToBottom();
 }
 inputBox.addEventListener("input", resizeInput);
+
+// ── Enter-to-send is a DESKTOP convention (Shift+Enter = newline). On
+//    mobile there is no physical Shift key, so e.shiftKey is always
+//    false — every Enter press was hijacked into "send", and there was
+//    no way to add a line break. Detect touch/coarse-pointer devices and
+//    let Enter behave like a normal textarea there (adds a newline);
+//    only the Send button submits. Desktop keeps the old behavior.
+const isTouchDevice = window.matchMedia("(pointer: coarse)").matches;
 inputBox.addEventListener("keydown", e => {
-    if (e.key === "Enter" && !e.shiftKey) {
+    if (e.key !== "Enter" || e.isComposing) return;
+    if (isTouchDevice) return; // let the keyboard insert a newline
+    if (!e.shiftKey) {
         e.preventDefault();
         handleSendAction();
     }
@@ -426,6 +440,21 @@ inputBox.addEventListener("keydown", e => {
 // ------------------------------------------
 function scrollToBottom() {
     chatBox.scrollTo({ top: chatBox.scrollHeight, behavior: "smooth" });
+}
+
+// ── Keep the last message visible when the on-screen keyboard opens/
+//    closes. `.chat-display` is sized with flex:1 inside a 100dvh column,
+//    so most mobile browsers DO shrink it when the keyboard appears — but
+//    nothing was re-scrolling to compensate, so the last message ended up
+//    pushed up behind the keyboard/input bar until the user scrolled
+//    manually. visualViewport fires on keyboard open/close (and rotation);
+//    re-pin to bottom each time. ──
+if (window.visualViewport) {
+    let vvResizeTimer = null;
+    window.visualViewport.addEventListener("resize", () => {
+        clearTimeout(vvResizeTimer);
+        vvResizeTimer = setTimeout(scrollToBottom, 80);
+    });
 }
 
 function hidePlaceholder() {
