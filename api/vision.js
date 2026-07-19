@@ -15,16 +15,19 @@
 //          /api/ask.js uses for the OpenRouter key.
 // ==========================================
 
-// NOTE ON THE 503 BUG:
-// "gemini-flash-latest" is an ALIAS. Google routes a huge share of
-// free-tier traffic through aliases, so they get overloaded and return
-// 503 ("model overloaded") way more often than a pinned version does.
-// Fix: try a pinned stable version first, and if THAT 503s too, fall
-// back to other models automatically instead of failing the request.
+// NOTE ON MODEL CHOICES (updated July 2026):
+// gemini-2.0-flash and gemini-2.0-flash-lite were SHUT DOWN by Google on
+// June 1, 2026 — every request to them now 404s. That was the actual
+// cause of "Vision not working": this list's #1 and #3 entries were
+// permanently dead, and only the middle alias fallback ever had a chance
+// of working. Updated to pinned CURRENT models, with the auto-updating
+// alias kept as a safety-net fallback (so this list doesn't silently
+// rot again the next time Google retires a model — check
+// https://ai.google.dev/gemini-api/docs/deprecations occasionally).
 const GEMINI_MODELS = [
-    "gemini-2.0-flash",       // pinned stable — primary
-    "gemini-flash-latest",    // alias — fallback #1
-    "gemini-2.0-flash-lite"   // lighter/less contended — fallback #2
+    "gemini-3.5-flash",       // pinned current stable — primary
+    "gemini-flash-latest",    // alias — always points at Google's current default Flash model
+    "gemini-3.1-flash-lite"   // lighter/less contended — fallback
 ];
 
 function geminiUrl(model) {
