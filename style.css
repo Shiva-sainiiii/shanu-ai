@@ -21,7 +21,7 @@
     --glass-bg-light:   rgba(255, 255, 255, 0.04);
     --glass-border:     rgba(255, 255, 255, 0.07);
     --glass-border-h:   rgba(255, 255, 255, 0.14);
-    --user-msg:         linear-gradient(135deg, #00D4F5 0%, #0062FF 100%);
+    --user-msg:         linear-gradient(135deg, #0F62D6 0%, #041E42 100%);
     --bot-msg:          rgba(22, 31, 50, 0.85);
     --shadow-sm:        0 4px 16px rgba(0, 0, 0, 0.25);
     --shadow-md:        0 8px 32px rgba(0, 0, 0, 0.35);
@@ -136,7 +136,7 @@ body.reduce-motion * { animation-duration: 0.01ms !important; transition-duratio
 
 /* ========== SIDEBAR ========== */
 .sidebar {
-    width: 275px;
+    width: 320px;
     flex-shrink: 0;
     background: rgba(8, 12, 22, 0.75);
     border-right: 1px solid var(--glass-border);
@@ -1164,11 +1164,12 @@ body.reduce-motion * { animation-duration: 0.01ms !important; transition-duratio
 
 .msg.user {
     align-self: flex-end;
+    max-width: 85%;
     background: var(--user-msg);
     color: #fff;
     border-bottom-right-radius: 4px;
     font-weight: 600;
-    box-shadow: 0 4px 20px rgba(0, 149, 255, 0.25);
+    box-shadow: 0 4px 20px rgba(4, 30, 66, 0.35);
 }
 
 .msg.bot {
@@ -1518,8 +1519,7 @@ body.reduce-motion * { animation-duration: 0.01ms !important; transition-duratio
     display: flex;
     gap: 8px;
     margin-top: 10px;
-    padding-top: 10px;
-    border-top: 1px solid var(--glass-border);
+    padding-top: 4px;
     flex-wrap: wrap;
 }
 
@@ -1953,6 +1953,7 @@ body.reduce-motion * { animation-duration: 0.01ms !important; transition-duratio
     .sidebar {
         position: fixed;
         top: 0; left: 0; bottom: 0;
+        width: min(320px, 85vw);
         transform: translateX(-100%);
         z-index: 200;
     }
