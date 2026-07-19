@@ -1398,19 +1398,41 @@ fileInput.addEventListener("change", e => {
 async function handleSendAction() {
     if (sending) return;
 
-    // Bloom mode: image generation (no attachment) or description (attachment present)
-    if (bloomMode) {
-        if (selectedFiles.length) { await processBloomDescribe(); return; }
-        const prompt = inputBox.value.trim();
-        if (!prompt) return;
-        await sendBloomGenerate(prompt);
-        return;
-    }
+    // ── Fix: "2-3 Enter presses → input bar jumps up" bug ──
+    //    lockUI() (which sets sending = true) used to only run inside
+    //    callAPI() — several `await`s downstream of this function's start
+    //    (addMessage() itself awaits parseAndExecuteActions before callAPI
+    //    is even reached). That left a real async gap where a second or
+    //    third Enter press, landing before lockUI() had actually executed,
+    //    sailed straight past the `if (sending) return` guard above. Each
+    //    one queued its own addMessage()+callAPI() pair — duplicate user
+    //    bubbles and duplicate bot replies stacking up in the chat, which
+    //    is what visually shoved the input bar upward.
+    //    Grabbing the lock HERE, synchronously, before any await, closes
+    //    that window: every press after the first now returns instantly.
+    if (!bloomMode && !selectedFiles.length && !inputBox.value.trim()) return;
+    sending = true;
+    sendBtn.disabled = true;
+    sendIcon.className = "fa-solid fa-spinner fa-spin";
 
-    if (selectedFiles.length) { await processAndSendFiles(); return; }
-    const text = inputBox.value.trim();
-    if (!text) return;
-    await sendTextMessage(text);
+    try {
+        // Bloom mode: image generation (no attachment) or description (attachment present)
+        if (bloomMode) {
+            if (selectedFiles.length) { await processBloomDescribe(); return; }
+            const prompt = inputBox.value.trim();
+            if (!prompt) { unlockUI(); return; }
+            await sendBloomGenerate(prompt);
+            return;
+        }
+
+        if (selectedFiles.length) { await processAndSendFiles(); return; }
+        const text = inputBox.value.trim();
+        if (!text) { unlockUI(); return; }
+        await sendTextMessage(text);
+    } catch (err) {
+        console.error("handleSendAction error:", err);
+        unlockUI();
+    }
 }
 
 sendBtn.addEventListener("click", handleSendAction);
@@ -1436,17 +1458,123 @@ async function fetchReplyFor(contextArray) {
     return data.reply || "Hmm... kuch samajh nahi aaya 🤔";
 }
 
+// ── Live token streaming ──
+//    Reads Server-Sent Events from /api/ask (stream: true) and paints
+//    text into the chat AS IT ARRIVES — the same live "typing" visual
+//    ChatGPT/Claude use, instead of dots-until-the-whole-reply-lands.
+//
+//    Action tags ([CHART]/[PDF]/[PPT]/[PREVIEW]/[IMAGE]) can only be
+//    parsed once the FULL text is in (parseAndExecuteActions needs the
+//    closing tag), so this function just streams raw text live into a
+//    plain bubble; the caller swaps it for the fully-rendered message
+//    (markdown + action cards + action bar) once the stream ends —
+//    that final step reuses the exact same addMessage() pipeline that
+//    already existed, so nothing about card rendering changes.
+async function streamReplyFor(contextArray, { onToken } = {}) {
+    const res = await fetch("/api/ask", {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({
+            messages:  contextArray.slice(-12),
+            mood:      currentMood,
+            webSearch: webSearchOn,
+            stream:    true
+        })
+    });
+
+    if (!res.ok || !res.body) {
+        // Server didn't/couldn't stream (older deploy, network proxy that
+        // strips SSE, etc.) — fall back to the plain non-streaming path
+        // so the feature degrades gracefully instead of hanging forever.
+        return fetchReplyFor(contextArray);
+    }
+
+    const reader  = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer   = "";
+    let fullText = "";
+    let sawAnyEvent = false;
+
+    while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const chunks = buffer.split("\n\n");
+        buffer = chunks.pop(); // keep last partial SSE event for next read
+
+        for (const chunk of chunks) {
+            const lines = chunk.split("\n");
+            let eventType = "message";
+            let dataLine  = "";
+            for (const line of lines) {
+                if (line.startsWith("event:")) eventType = line.slice(6).trim();
+                else if (line.startsWith("data:")) dataLine = line.slice(5).trim();
+            }
+            if (!dataLine) continue;
+
+            let payload;
+            try { payload = JSON.parse(dataLine); } catch { continue; }
+
+            if (eventType === "delta" && payload.text) {
+                sawAnyEvent = true;
+                fullText += payload.text;
+                onToken?.(fullText);
+            } else if (eventType === "done") {
+                sawAnyEvent = true;
+                fullText = payload.reply || fullText;
+            } else if (eventType === "error") {
+                sawAnyEvent = true;
+                throw new Error(payload.message || "Stream error");
+            }
+        }
+    }
+
+    if (!sawAnyEvent) return fetchReplyFor(contextArray); // safety net
+    return fullText.trim() || "Hmm... samajh nahi aaya 🤔";
+}
+
+// Creates the live-updating plain-text bubble that streamReplyFor()
+// paints into, styled to match .msg.bot so there's no visual jump when
+// it's later replaced by the fully-rendered addMessage() bubble.
+function createStreamingBubble() {
+    hidePlaceholder();
+    const div = document.createElement("div");
+    div.className = "msg bot streaming-msg";
+    const textSpan = document.createElement("span");
+    textSpan.className = "stream-text";
+    const cursor = document.createElement("span");
+    cursor.className = "stream-cursor";
+    div.appendChild(textSpan);
+    div.appendChild(cursor);
+    chatBox.appendChild(div);
+    scrollToBottom();
+    return { el: div, textSpan };
+}
+
 async function callAPI() {
     lockUI();
     const typingEl = showTyping();
+    let streamBubble = null;
     try {
-        const reply = await fetchReplyFor(chatContext);
-        typingEl.remove();
+        const reply = await streamReplyFor(chatContext, {
+            onToken: (text) => {
+                if (!streamBubble) {
+                    typingEl.remove();
+                    streamBubble = createStreamingBubble();
+                }
+                streamBubble.textSpan.textContent = text;
+                scrollToBottom();
+            }
+        });
+        streamBubble?.el.remove();
+        if (!streamBubble) typingEl.remove(); // stream produced nothing before falling back
         await addMessage(reply, "bot", "live");
         chatContext.push({ role: "assistant", content: reply });
         await saveMessageToDB("assistant", reply);
     } catch (err) {
         console.error("API Error:", err);
+        streamBubble?.el.remove();
         typingEl.remove();
         addMessage("❌ Network error! Please check your connection.", "bot", false);
     }
@@ -1464,15 +1592,27 @@ async function regenerateReply(contextSnapshot, retryBtn) {
     retryBtn.classList.add("spinning");
     lockUI();
     const typingEl = showTyping();
+    let streamBubble = null;
     try {
-        const reply = await fetchReplyFor(contextSnapshot);
-        typingEl.remove();
+        const reply = await streamReplyFor(contextSnapshot, {
+            onToken: (text) => {
+                if (!streamBubble) {
+                    typingEl.remove();
+                    streamBubble = createStreamingBubble();
+                }
+                streamBubble.textSpan.textContent = text;
+                scrollToBottom();
+            }
+        });
+        streamBubble?.el.remove();
+        if (!streamBubble) typingEl.remove();
         await addMessage(reply, "bot", "live");
         chatContext.push({ role: "assistant", content: reply });
         await saveMessageToDB("assistant", reply);
         showToast("🔄 New response added below");
     } catch (err) {
         console.error("Retry Error:", err);
+        streamBubble?.el.remove();
         typingEl.remove();
         showToast("❌ Retry failed — check your connection");
     }
