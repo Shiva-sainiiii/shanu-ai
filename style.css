@@ -1797,8 +1797,28 @@ body.reduce-motion * { animation-duration: 0.01ms !important; transition-duratio
     box-shadow: var(--shadow-md), 0 0 0 3px rgba(0, 229, 255, 0.06), inset 0 1px 0 rgba(255,255,255,0.05);
 }
 
-#inputBox {
+/* ── Fix: stray blue "teardrop" stuck below the input ──
+   That's Android's native text-selection/caret drag-handle — drawn by
+   the OS relative to the textarea's caret, not by our CSS. When the
+   caret sits near the bottom edge (e.g. after a long-press-to-select
+   gesture on a short/empty textarea), the handle renders a few px
+   below it and nothing was clipping that overflow, so it visually
+   spilled out past the rounded input pill and could look "stuck" there
+   even after the selection was gone. This wrapper clips just the
+   textarea's own overflow — normal text selection/copy-paste still
+   works exactly as before. Deliberately NOT applied to .input-bar
+   itself, since that would also clip the mic button's pulsing
+   recording ring (.mic-ring uses inset:-6px and needs overflow:visible
+   on its ancestor to show correctly). */
+.textarea-clip {
     flex: 1;
+    align-self: flex-end;
+    overflow: hidden;
+    border-radius: 14px;
+}
+
+#inputBox {
+    width: 100%;
     background: transparent;
     border: none;
     color: var(--text-main);
@@ -1810,7 +1830,7 @@ body.reduce-motion * { animation-duration: 0.01ms !important; transition-duratio
     min-height: 26px;
     padding: 6px 4px;
     line-height: 1.55;
-    align-self: flex-end;
+    display: block;
 }
 
 #inputBox::placeholder { color: var(--text-muted); }
